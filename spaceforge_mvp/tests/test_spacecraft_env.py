@@ -28,66 +28,88 @@ def test_observation_and_action_space_shapes():
     np.testing.assert_allclose(env.action_space.high, 1.0)
 
 
-def test_reward_includes_bonus_at_close_distance():
+def test_potential_based_reward_shaping_two_steps():
     """
-    Test 2: reward at dist=0.3 includes +100 docking bonus and proximity-shaping bonus.
+    Test 2: potential-based reward shaping calculated over two sequential steps.
 
-    Hand calculation:
-      pos = [0.3, 0.0, 0.0] => dist = 0.3
-      vel = [0.0, 0.0, 0.0] => speed = 0.0
-      action = [0.0, 0.0, 0.0] => action_penalty = 0.0
-      docking_bonus = 100.0 (since dist = 0.3 < 0.5)
-      proximity_bonus = 5.0 * max(0, 1 - 0.3/10.0) = 5.0 * 0.97 = 4.85
-      reward = -0.3 - 0.5*(0) - 0.01*(0) + 100.0 + 4.85 = 104.55
-    """
-    env = SpacecraftEnv()
-    pos = np.array([0.3, 0.0, 0.0], dtype=np.float64)
-    vel = np.array([0.0, 0.0, 0.0], dtype=np.float64)
-    action = np.array([0.0, 0.0, 0.0], dtype=np.float64)
+    Hand calculation breakdown:
+      Setup:
+        pos_0 = [10.0, 0.0, 0.0], vel_0 = [0.0, 0.0, 0.0], dt = 1.0, n = 0.00113
 
-    expected_reward = -0.3 + 100.0 + (5.0 * (1.0 - 0.3 / 10.0))  # 104.55
-    reward = env.compute_reward(pos, vel, action)
+      Step 1 (action_1 = [-0.1, 0.0, 0.0]):
+        dist_prev = 10.0
+        a_cw = [0.000038307, 0.0, 0.0]
+        a_total = [-0.099961693, 0.0, 0.0]
+        vel_1 = [-0.099961693, 0.0, 0.0]
+        pos_1 = [9.900038307, 0.0, 0.0]
+        dist_curr = 9.900038307
+        progress_reward = 5.0 * (10.0 - 9.900038307) = 0.499808465
+        velocity_penalty = -0.5 * 0.099961693 = -0.0499808465
+        action_penalty = -0.01 * 0.1 = -0.001
+        reward_1 = 0.499808465 - 0.0499808465 - 0.001 = 0.4488276185
 
-    assert reward > 90.0, f"Reward should include +100 bonus, got {reward}"
-    assert reward == pytest.approx(expected_reward, abs=1e-7)
-
-
-def test_reward_at_large_distance_with_large_action():
-    """
-    Test 3: reward at dist=10 with large action is more negative and has no docking bonus.
-
-    Hand calculation:
-      pos = [10.0, 0.0, 0.0] => dist = 10.0
-      vel = [0.0, 0.0, 0.0] => speed = 0.0
-      docking_bonus = 0.0 (dist >= 0.5)
-      proximity_bonus = 5.0 * max(0, 1 - 10.0/10.0) = 0.0
-
-      zero_action = [0.0, 0.0, 0.0] => action_penalty = 0.0
-      reward_zero_action = -10.0 + 0 = -10.0
-
-      large_action = [1.0, 1.0, 1.0] => action_penalty = 0.01 * 3.0 = 0.03
-      reward_large_action = -10.0 - 0.03 + 0 = -10.03
+      Step 2 (action_2 = [-0.1, 0.0, 0.0]):
+        dist_prev = 9.900038307
+        a_cw = [0.000037924077, 0.000225913426, 0.0]
+        a_total = [-0.0999620759, 0.000225913426, 0.0]
+        vel_2 = [-0.1999237689, 0.0002259134, 0.0]
+        pos_2 = [9.700114538, 0.0002259134, 0.0]
+        dist_curr = 9.700114541
+        progress_reward = 5.0 * (9.900038307 - 9.700114541) = 0.999618831
+        velocity_penalty = -0.5 * 0.199923897 = -0.099961948
+        action_penalty = -0.01 * 0.1 = -0.001
+        reward_2 = 0.999618831 - 0.099961948 - 0.001 = 0.8986568832
     """
     env = SpacecraftEnv()
-    pos = np.array([10.0, 0.0, 0.0], dtype=np.float64)
-    vel = np.array([0.0, 0.0, 0.0], dtype=np.float64)
+    env.reset(seed=42)
+    env.rel_pos = np.array([10.0, 0.0, 0.0], dtype=np.float64)
+    env.rel_vel = np.array([0.0, 0.0, 0.0], dtype=np.float64)
 
-    zero_action = np.array([0.0, 0.0, 0.0], dtype=np.float64)
-    large_action = np.array([1.0, 1.0, 1.0], dtype=np.float64)
+    action = np.array([-0.1, 0.0, 0.0], dtype=np.float32)
 
-    reward_zero_action = env.compute_reward(pos, vel, zero_action)
-    reward_large_action = env.compute_reward(pos, vel, large_action)
+    # Step 1
+    _, reward_1, _, _, _ = env.step(action)
+    expected_reward_1 = 0.4488276185
+    assert reward_1 == pytest.approx(expected_reward_1, abs=1e-7)
 
-    assert reward_zero_action == pytest.approx(-10.0, abs=1e-7)
-    assert reward_large_action == pytest.approx(-10.03, abs=1e-7)
+    # Step 2
+    _, reward_2, _, _, _ = env.step(action)
+    expected_reward_2 = 0.8986568832
+    assert reward_2 == pytest.approx(expected_reward_2, abs=1e-7)
 
-    assert reward_large_action < 0.0
-    assert reward_large_action < reward_zero_action
+
+def test_docking_bonus_at_close_distance():
+    """Test 3: +100 docking bonus triggers when dist_curr < 0.5."""
+    env = SpacecraftEnv()
+    env.reset(seed=42)
+    env.rel_pos = np.array([0.4, 0.0, 0.0], dtype=np.float64)  # dist_prev = 0.4
+    env.rel_vel = np.array([0.0, 0.0, 0.0], dtype=np.float64)
+
+    action = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+    _, reward, _, _, info = env.step(action)
+
+    assert info["distance"] < 0.5
+    # Should include +100 docking bonus
+    assert reward > 90.0
+
+
+def test_observation_rel_pos_normalization():
+    """
+    Test 4: assert normalized rel_pos values stay in a roughly [-1.5, 1.5] range
+    for a randomly sampled batch of valid initial environment states.
+    """
+    env = SpacecraftEnv()
+    for i in range(50):
+        obs, _ = env.reset(seed=100 + i)
+        norm_pos = obs[0:3]
+        # Starting positions are in [-20, 20]m, normalized by 20.0 -> [-1.0, 1.0]
+        assert np.all(norm_pos >= -1.5), f"norm_pos {norm_pos} below -1.5"
+        assert np.all(norm_pos <= 1.5), f"norm_pos {norm_pos} above 1.5"
 
 
 def test_reset_then_step_real_call():
     """
-    Test 4: reset() then step(valid random action) returns correctly-shaped obs
+    Test 5: reset() then step(valid random action) returns correctly-shaped obs
     and a finite (non-NaN/inf) reward — a real call, not mocked.
     """
     env = SpacecraftEnv()
@@ -115,7 +137,7 @@ def test_reset_then_step_real_call():
 
 
 def test_fuel_depletion_sets_truncated_not_terminated():
-    """Test 5: Fuel depletion sets truncated=True and terminated=False (when dist >= 0.5)."""
+    """Test 6: Fuel depletion sets truncated=True and terminated=False (when dist >= 0.5)."""
     env = SpacecraftEnv()
     env.reset(seed=42)
     env.rel_pos = np.array([10.0, 0.0, 0.0], dtype=np.float64)  # dist = 10 >= 0.5
