@@ -29,14 +29,23 @@ def test_observation_and_action_space_shapes():
 
 
 def test_reward_includes_bonus_at_close_distance():
-    """Test 2: reward at dist=0.3 includes +100 bonus."""
+    """
+    Test 2: reward at dist=0.3 includes +100 docking bonus and proximity-shaping bonus.
+
+    Hand calculation:
+      pos = [0.3, 0.0, 0.0] => dist = 0.3
+      vel = [0.0, 0.0, 0.0] => speed = 0.0
+      action = [0.0, 0.0, 0.0] => action_penalty = 0.0
+      docking_bonus = 100.0 (since dist = 0.3 < 0.5)
+      proximity_bonus = 5.0 * max(0, 1 - 0.3/10.0) = 5.0 * 0.97 = 4.85
+      reward = -0.3 - 0.5*(0) - 0.01*(0) + 100.0 + 4.85 = 104.55
+    """
     env = SpacecraftEnv()
-    pos = np.array([0.3, 0.0, 0.0], dtype=np.float64)  # ||pos|| = 0.3 < 0.5
+    pos = np.array([0.3, 0.0, 0.0], dtype=np.float64)
     vel = np.array([0.0, 0.0, 0.0], dtype=np.float64)
     action = np.array([0.0, 0.0, 0.0], dtype=np.float64)
 
-    # Expected: -0.3 - 0.5*(0) - 0.01*(0) + 100 = 99.7
-    expected_reward = -0.3 + 100.0
+    expected_reward = -0.3 + 100.0 + (5.0 * (1.0 - 0.3 / 10.0))  # 104.55
     reward = env.compute_reward(pos, vel, action)
 
     assert reward > 90.0, f"Reward should include +100 bonus, got {reward}"
@@ -44,25 +53,35 @@ def test_reward_includes_bonus_at_close_distance():
 
 
 def test_reward_at_large_distance_with_large_action():
-    """Test 3: reward at dist=10 with large action is more negative and has no bonus."""
+    """
+    Test 3: reward at dist=10 with large action is more negative and has no docking bonus.
+
+    Hand calculation:
+      pos = [10.0, 0.0, 0.0] => dist = 10.0
+      vel = [0.0, 0.0, 0.0] => speed = 0.0
+      docking_bonus = 0.0 (dist >= 0.5)
+      proximity_bonus = 5.0 * max(0, 1 - 10.0/10.0) = 0.0
+
+      zero_action = [0.0, 0.0, 0.0] => action_penalty = 0.0
+      reward_zero_action = -10.0 + 0 = -10.0
+
+      large_action = [1.0, 1.0, 1.0] => action_penalty = 0.01 * 3.0 = 0.03
+      reward_large_action = -10.0 - 0.03 + 0 = -10.03
+    """
     env = SpacecraftEnv()
-    pos = np.array([10.0, 0.0, 0.0], dtype=np.float64)  # ||pos|| = 10.0 >= 0.5
+    pos = np.array([10.0, 0.0, 0.0], dtype=np.float64)
     vel = np.array([0.0, 0.0, 0.0], dtype=np.float64)
 
     zero_action = np.array([0.0, 0.0, 0.0], dtype=np.float64)
-    large_action = np.array([1.0, 1.0, 1.0], dtype=np.float64)  # sum(|action|) = 3.0
+    large_action = np.array([1.0, 1.0, 1.0], dtype=np.float64)
 
     reward_zero_action = env.compute_reward(pos, vel, zero_action)
     reward_large_action = env.compute_reward(pos, vel, large_action)
 
-    # Zero action expected: -10.0 + 0 = -10.0
-    # Large action expected: -10.0 - 0.01*(3.0) + 0 = -10.03
     assert reward_zero_action == pytest.approx(-10.0, abs=1e-7)
     assert reward_large_action == pytest.approx(-10.03, abs=1e-7)
 
-    # Must have no +100 bonus (strictly negative)
     assert reward_large_action < 0.0
-    # Must be more negative than with zero action
     assert reward_large_action < reward_zero_action
 
 
