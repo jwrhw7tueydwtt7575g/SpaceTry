@@ -91,23 +91,23 @@ spaceforge-mvp/
 
 ```mermaid
 flowchart TD
-    subgraph Core Dynamics
+    subgraph S_CORE ["Core Dynamics"]
         A["cw_dynamics.py<br/>Clohessy-Wiltshire Math"]
     end
 
-    subgraph Environment Layer
+    subgraph S_ENV ["Environment Layer"]
         B["spacecraft_env.py<br/>SpacecraftEnv (Gym.Env)"]
     end
 
-    subgraph Safety Assurance Layer
+    subgraph S_SAFETY ["Safety Assurance Layer"]
         C["mission_safety.py<br/>evaluate_goal() Interlock"]
     end
 
-    subgraph Agent & Control Layer
+    subgraph S_AGENT ["Agent and Control Layer"]
         D["train.py<br/>PPO Policy (SB3)"]
     end
 
-    subgraph Evaluation Tier
+    subgraph S_EVAL ["Evaluation Tier"]
         E["run_eval.py<br/>Metrics Report"]
         F["plot_trajectory.py<br/>2D Trajectory PNG"]
     end
@@ -130,27 +130,27 @@ While `spaceforge-mvp` focuses on numerical physics and policy optimization, the
 
 ```mermaid
 flowchart TD
-    subgraph Layer 5 — Mission Intelligence
+    subgraph S5 ["Layer 5: Mission Intelligence"]
         L5["llm_planner Node<br/>LangChain Tool-Calling Agent"]
     end
 
-    subgraph Safety Assurance Interlock
+    subgraph S_SAFE ["Safety Assurance Interlock"]
         LSA["mission_ctrl Node<br/>Deterministic Runtime Assurance"]
     end
 
-    subgraph Layer 4 — Decision Making
+    subgraph S4 ["Layer 4: Decision Making"]
         L4["rl_env + rl_trainer Nodes<br/>Gymnasium + PPO / SAC Policy"]
     end
 
-    subgraph Layer 3 — Perception
+    subgraph S3 ["Layer 3: Perception"]
         L3["perception Node<br/>YOLOv8 + OpenCV solvePnP Pose"]
     end
 
-    subgraph Layer 2 — Middleware
+    subgraph S2 ["Layer 2: Middleware"]
         L2["sim_bridge Node<br/>ros_gz Transport Bridge"]
     end
 
-    subgraph Layer 1 — Simulation & Physics
+    subgraph S1 ["Layer 1: Simulation and Physics"]
         L1["Gazebo Harmonic World<br/>Orbital Dynamics & Sensor Plugins"]
     end
 
