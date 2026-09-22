@@ -129,7 +129,9 @@ def parse_args() -> Tuple[str, int, int]:
         help="Path to trained model .zip checkpoint",
     )
     parser.add_argument(
+        "--episodes",
         "--num_episodes",
+        dest="episodes",
         type=int,
         default=20,
         help="Number of evaluation episodes to run (default: 20)",
@@ -145,7 +147,7 @@ def parse_args() -> Tuple[str, int, int]:
     ckpt = args.checkpoint or args.checkpoint_pos
     if not ckpt:
         parser.error("A checkpoint path must be provided via --checkpoint or positional argument.")
-    return ckpt, args.num_episodes, args.seed
+    return ckpt, args.episodes, args.seed
 
 
 if __name__ == "__main__":
