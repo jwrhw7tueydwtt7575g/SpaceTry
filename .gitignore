@@ -1,9 +1,10 @@
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
+
+# Distribution / packaging
 .Python
-env/
 build/
 develop-eggs/
 dist/
@@ -19,9 +20,21 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+
+# Pytest & Coverage
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Environments
+.env
 .venv
+env/
 venv/
 ENV/
+
+# Checkpoint binaries & intermediate test outputs
+checkpoints/ppo_spacecraft_[0-9]*.zip
+*.png
+logs/
+tensorboard_logs/

@@ -1,22 +1,11 @@
 """Evaluation script for trained Spacecraft PPO checkpoint."""
 
 import argparse
-import sys
-from pathlib import Path
 from typing import Any, Dict, Tuple
-
-import numpy as np
 from stable_baselines3 import PPO
 
-# Ensure importability across directories
-repo_root = Path(__file__).resolve().parent.parent.parent
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
-
-try:
-    from spaceforge_mvp.env.spacecraft_env import SpacecraftEnv
-except ImportError:
-    from env.spacecraft_env import SpacecraftEnv
+from spaceforge_mvp.config import ENV_CONFIG, SAFETY_CONFIG
+from spaceforge_mvp.env.spacecraft_env import SpacecraftEnv
 
 
 def run_eval(
@@ -70,8 +59,12 @@ def run_eval(
 
             done = terminated or truncated
 
-        # Episode succeeds if dist < 0.5 reached before timeout or fuel depletion
-        if last_info.get("is_success", False):
+        # Episode succeeds if dist < 0.5m AND speed < 0.1m/s reached before timeout or fuel depletion
+        is_docked = (
+            last_info.get("distance", 999.0) < ENV_CONFIG.docking_success_dist
+            and last_info.get("speed", 999.0) < SAFETY_CONFIG.max_docking_speed
+        )
+        if is_docked or last_info.get("is_success", False):
             success_count += 1
 
         fuel_used = max(0.0, initial_fuel - float(env.fuel))

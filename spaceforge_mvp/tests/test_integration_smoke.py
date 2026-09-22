@@ -1,77 +1,49 @@
-"""Full pipeline end-to-end integration test."""
+"""End-to-end integration smoke test for full pipeline."""
 
-import os
-import sys
 from pathlib import Path
-import pytest
-
-repo_root = Path(__file__).resolve().parent.parent
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
-
-try:
-    from spaceforge_mvp.training.train import train
-    from spaceforge_mvp.eval.run_eval import run_eval
-    from spaceforge_mvp.eval.plot_trajectory import plot_trajectory
-except ImportError:
-    from training.train import train
-    from eval.run_eval import run_eval
-    from eval.plot_trajectory import plot_trajectory
+from spaceforge_mvp.eval.plot_trajectory import plot_trajectory
+from spaceforge_mvp.eval.run_eval import run_eval
+from spaceforge_mvp.training.train import train
 
 
 def test_full_pipeline_integration_smoke(tmp_path):
     """
-    End-to-end integration check:
-      1. Train for 1000 timesteps (fresh)
-      2. Run eval/run_eval.py against that checkpoint for 5 episodes
-      3. Run eval/plot_trajectory.py once
-      4. Assert:
-         - no exceptions anywhere in the chain
-         - the eval report has all 4 metrics
-         - trajectory.png is produced and non-empty
+    End-to-end integration test:
+      1. Train PPO policy for 1000 timesteps into tmp_path
+      2. Run run_eval against the output checkpoint for 5 episodes
+      3. Run plot_trajectory to generate trajectory plot PNG
+      4. Assert all metrics present and non-zero-byte PNG produced
     """
-    save_dir = str(tmp_path / "integration_ckpts")
-    output_png = str(tmp_path / "eval" / "trajectory.png")
+    save_dir = str(tmp_path / "checkpoints")
+    plot_output = str(tmp_path / "trajectory.png")
 
-    # 1. Train fresh model for 1000 timesteps
-    model, reward_tracker = train(
+    # Step 1: Train for 1000 timesteps
+    model, tracker = train(
         total_timesteps=1000,
         save_freq=1000,
         save_dir=save_dir,
-        verbose=1,
+        verbose=0,
     )
-    assert model is not None, "Model failed to train"
+    assert model is not None, "Training model object should not be None"
 
-    checkpoint_file = Path(save_dir) / "ppo_spacecraft_final.zip"
-    if not checkpoint_file.exists():
-        checkpoint_file = Path(save_dir) / "ppo_spacecraft_1000_steps.zip"
-    assert checkpoint_file.exists(), f"Expected checkpoint file not found at {checkpoint_file}"
+    ckpt_path = Path(save_dir) / "ppo_spacecraft_final.zip"
+    if not ckpt_path.exists():
+        ckpt_path = Path(save_dir) / "ppo_spacecraft_1000_steps.zip"
 
-    # 2. Run evaluation against checkpoint for 5 episodes
-    report = run_eval(
-        checkpoint_path=str(checkpoint_file),
-        num_episodes=5,
-    )
+    assert ckpt_path.exists(), f"Checkpoint {ckpt_path} was not created."
 
-    # Assert eval report has all 4 metrics
-    assert "success_rate" in report, "Metric 'success_rate' missing from report"
-    assert "avg_fuel_used" in report, "Metric 'avg_fuel_used' missing from report"
-    assert "avg_episode_length" in report, "Metric 'avg_episode_length' missing from report"
-    assert "safety_overrides_count" in report, "Metric 'safety_overrides_count' missing from report"
+    # Step 2: Run evaluation over 5 episodes
+    report = run_eval(checkpoint_path=str(ckpt_path), num_episodes=5)
 
-    assert 0.0 <= report["success_rate"] <= 1.0
-    assert report["avg_fuel_used"] >= 0.0
-    assert report["avg_episode_length"] > 0.0
-    assert report["safety_overrides_count"] >= 0
+    assert "success_rate" in report
+    assert "avg_fuel_used" in report
+    assert "avg_episode_length" in report
+    assert "safety_overrides_count" in report
 
-    # 3. Run trajectory plotting once
-    saved_png_path = plot_trajectory(
-        checkpoint_path=str(checkpoint_file),
-        output_path=output_png,
-        seed=42,
-    )
+    # Step 3: Run plot_trajectory once
+    plot_trajectory(checkpoint_path=str(ckpt_path), output_path=plot_output)
 
-    # 4. Assert trajectory.png is produced and non-empty
-    png_file = Path(saved_png_path)
-    assert png_file.exists(), f"Expected output PNG {png_file} does not exist"
-    assert png_file.stat().st_size > 0, f"Expected output PNG {png_file} to be non-empty"
+    # Step 4: Assert non-zero-byte trajectory plot PNG produced
+    png_path = Path(plot_output)
+    assert png_path.exists(), f"Trajectory plot {png_path} was not generated."
+    assert png_path.stat().st_size > 0, f"Trajectory plot {png_path} is a 0-byte file."

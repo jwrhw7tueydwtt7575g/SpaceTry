@@ -1,5 +1,5 @@
-"""Orbital dynamics and math module."""
+"""Core orbital relative dynamics module."""
 
-from .cw_dynamics import cw_accel, cw_step
+from spaceforge_mvp.core.cw_dynamics import cw_accel, cw_step, cw_stm_matrices
 
-__all__ = ["cw_accel", "cw_step"]
+__all__ = ["cw_accel", "cw_step", "cw_stm_matrices"]

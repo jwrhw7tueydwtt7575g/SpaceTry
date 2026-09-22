@@ -2,24 +2,19 @@
 
 import argparse
 import os
-import sys
-from pathlib import Path
 from typing import List, Optional, Tuple
 
 import numpy as np
 from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback
+from stable_baselines3.common.callbacks import (
+    BaseCallback,
+    CallbackList,
+    CheckpointCallback,
+    EvalCallback,
+)
 from stable_baselines3.common.monitor import Monitor
 
-# Ensure importability across different invocation working directories
-repo_root = Path(__file__).resolve().parent.parent.parent
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
-
-try:
-    from spaceforge_mvp.env.spacecraft_env import SpacecraftEnv
-except ImportError:
-    from env.spacecraft_env import SpacecraftEnv
+from spaceforge_mvp.env.spacecraft_env import SpacecraftEnv
 
 
 class RewardTrackerCallback(BaseCallback):
@@ -54,7 +49,9 @@ def train(
     total_timesteps: int = 200_000,
     save_freq: int = 1000,
     save_dir: str = "checkpoints",
+    tensorboard_log: Optional[str] = None,
     env: Optional[SpacecraftEnv] = None,
+    eval_freq: int = 5000,
     verbose: int = 1,
     seed: int = 42,
 ) -> Tuple[PPO, RewardTrackerCallback]:
@@ -69,8 +66,12 @@ def train(
         Checkpoint save frequency (default: 1000).
     save_dir : str
         Directory to save model checkpoints.
+    tensorboard_log : str, optional
+        TensorBoard log directory path.
     env : SpacecraftEnv, optional
         Custom environment instance.
+    eval_freq : int
+        Evaluation callback frequency.
     verbose : int
         Verbosity level for PPO logging.
     seed : int
@@ -83,6 +84,7 @@ def train(
     """
     os.makedirs(save_dir, exist_ok=True)
     monitored_env = make_env(env)
+    eval_env = make_env()
 
     # Ensure at least one periodic checkpoint triggers even for short test runs
     effective_save_freq = min(save_freq, total_timesteps)
@@ -93,7 +95,21 @@ def train(
         name_prefix="ppo_spacecraft",
     )
     reward_tracker = RewardTrackerCallback()
-    callbacks = CallbackList([checkpoint_callback, reward_tracker])
+    
+    callbacks_list = [checkpoint_callback, reward_tracker]
+    
+    if total_timesteps >= 2000:
+        eval_callback = EvalCallback(
+            eval_env,
+            best_model_save_path=save_dir,
+            log_path=save_dir,
+            eval_freq=min(eval_freq, total_timesteps),
+            deterministic=True,
+            render=False,
+        )
+        callbacks_list.append(eval_callback)
+
+    callbacks = CallbackList(callbacks_list)
 
     model = PPO(
         policy="MlpPolicy",
@@ -102,6 +118,7 @@ def train(
         batch_size=64,
         gamma=0.99,
         verbose=verbose,
+        tensorboard_log=tensorboard_log,
         seed=seed,
     )
 
@@ -136,6 +153,12 @@ def parse_args() -> argparse.Namespace:
         help="Directory to save checkpoints (default: checkpoints)",
     )
     parser.add_argument(
+        "--tensorboard_log",
+        type=str,
+        default=None,
+        help="TensorBoard log directory (default: None)",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=42,
@@ -150,5 +173,6 @@ if __name__ == "__main__":
         total_timesteps=args.total_timesteps,
         save_freq=args.save_freq,
         save_dir=args.save_dir,
+        tensorboard_log=args.tensorboard_log,
         seed=args.seed,
     )

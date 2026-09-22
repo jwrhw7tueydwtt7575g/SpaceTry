@@ -1,18 +1,8 @@
 """Smoke test for PPO training script."""
 
-import sys
 from pathlib import Path
 import numpy as np
-import pytest
-
-repo_root = Path(__file__).resolve().parent.parent
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
-
-try:
-    from spaceforge_mvp.training.train import train
-except ImportError:
-    from training.train import train
+from spaceforge_mvp.training.train import train
 
 
 def test_train_smoke_500_steps(tmp_path):

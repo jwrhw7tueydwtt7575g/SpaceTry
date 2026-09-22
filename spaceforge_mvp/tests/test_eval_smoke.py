@@ -1,20 +1,9 @@
 """Smoke test for policy evaluation script."""
 
-import sys
 from pathlib import Path
 import numpy as np
-import pytest
-
-repo_root = Path(__file__).resolve().parent.parent
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
-
-try:
-    from spaceforge_mvp.eval.run_eval import run_eval
-    from spaceforge_mvp.training.train import train
-except ImportError:
-    from eval.run_eval import run_eval
-    from training.train import train
+from spaceforge_mvp.eval.run_eval import run_eval
+from spaceforge_mvp.training.train import train
 
 
 def test_run_eval_smoke_end_to_end(tmp_path, capsys):

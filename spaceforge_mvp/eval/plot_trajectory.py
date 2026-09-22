@@ -1,148 +1,168 @@
-"""Plot 2D trajectory of spacecraft relative rendezvous motion."""
+"""Trajectory visualization script for Spacecraft Env policy evaluation."""
 
 import argparse
 import os
-import sys
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 
-import matplotlib
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from stable_baselines3 import PPO
 
-# Ensure importability across execution contexts
-repo_root = Path(__file__).resolve().parent.parent.parent
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
+from spaceforge_mvp.config import ENV_CONFIG
+from spaceforge_mvp.env.spacecraft_env import SpacecraftEnv
 
-try:
-    from spaceforge_mvp.env.spacecraft_env import SpacecraftEnv
-except ImportError:
-    from env.spacecraft_env import SpacecraftEnv
+# Set matplotlib non-interactive backend for headless execution
+plt.switch_backend("Agg")
 
 
-def plot_trajectory(
-    checkpoint_path: str = "checkpoints/ppo_spacecraft_final.zip",
-    output_path: str = "eval/trajectory.png",
+def generate_trajectory_data(
+    checkpoint_path: str,
     seed: int = 42,
-    deterministic: bool = True,
-) -> str:
+    max_steps: int = ENV_CONFIG.max_steps,
+) -> Tuple[List[np.ndarray], bool, float, float]:
     """
-    Run one episode with a given checkpoint, record rel_pos at every step,
-    and save a matplotlib 2D plot (x vs y) with start/end markers and a dashed
-    circle at the 0.5m success radius.
-
-    Parameters
-    ----------
-    checkpoint_path : str
-        Path to the saved SB3 .zip checkpoint.
-    output_path : str
-        Destination path for saving the PNG plot.
-    seed : int
-        Environment initial state random seed.
-    deterministic : bool
-        Whether to predict actions deterministically.
+    Run single episode evaluation recording relative 2D positions (X-radial vs Y-in-track).
 
     Returns
     -------
-    str
-        Path to the saved plot image.
+    Tuple[List[np.ndarray], bool, float, float]
+        (trajectory_positions, is_success, final_dist, final_fuel)
     """
-    model = PPO.load(checkpoint_path)
-    env = SpacecraftEnv()
+    model = PPO.load(checkpoint_path, seed=seed)
+    env = SpacecraftEnv(max_steps=max_steps)
 
     obs, info = env.reset(seed=seed)
-    trajectory: List[np.ndarray] = [env.rel_pos.copy()]
-
+    trajectory: List[np.ndarray] = [env.rel_pos[0:2].copy()]
     done = False
+    last_info = info
+
     while not done:
-        action, _ = model.predict(obs, deterministic=deterministic)
-        obs, reward, terminated, truncated, info = env.step(action)
-        trajectory.append(env.rel_pos.copy())
+        action, _ = model.predict(obs, deterministic=True)
+        obs, reward, terminated, truncated, last_info = env.step(action)
+        trajectory.append(env.rel_pos[0:2].copy())
         done = terminated or truncated
 
-    traj_arr = np.array(trajectory)
-    xs = traj_arr[:, 0]
-    ys = traj_arr[:, 1]
+    final_dist = float(np.linalg.norm(env.rel_pos))
+    final_fuel = float(env.fuel)
+    is_success = bool(last_info.get("is_success", False))
 
-    # Create 2D plot (x vs y)
-    fig, ax = plt.subplots(figsize=(8, 8))
+    return trajectory, is_success, final_dist, final_fuel
 
-    # Trajectory path
-    ax.plot(xs, ys, color="#1f77b4", linewidth=1.8, label="Trajectory (x vs y)")
 
-    # Start and End markers
-    ax.scatter(xs[0], ys[0], color="#2ca02c", marker="o", s=90, zorder=5, label=f"Start ({xs[0]:.1f}, {ys[0]:.1f})m")
-    ax.scatter(xs[-1], ys[-1], color="#d62728", marker="X", s=100, zorder=5, label=f"End ({xs[-1]:.1f}, {ys[-1]:.1f})m")
+def plot_trajectory(
+    checkpoint_path: str,
+    output_path: str = "eval/trajectory.png",
+    seed: int = 42,
+) -> None:
+    """Generate 2D matplotlib relative trajectory plot and save to disk."""
+    trajectory, is_success, final_dist, final_fuel = generate_trajectory_data(
+        checkpoint_path=checkpoint_path,
+        seed=seed,
+    )
 
-    # Target marker at relative origin (0, 0)
-    ax.scatter(0, 0, color="black", marker="*", s=140, zorder=6, label="Target (0, 0)")
+    traj_arr = np.array(trajectory)  # shape (N, 2)
+    x_coords = traj_arr[:, 0]
+    y_coords = traj_arr[:, 1]
 
-    # Dashed circle at the 0.5m success radius
-    success_circle = plt.Circle(
+    fig, ax = plt.subplots(figsize=(8, 8), dpi=150)
+
+    # Plot 0.5m success radius target circle
+    target_circle = plt.Circle(
         (0.0, 0.0),
-        0.5,
-        color="#2ca02c",
+        ENV_CONFIG.docking_success_dist,
+        color="green",
         fill=False,
         linestyle="--",
-        linewidth=2.0,
-        label="Success Radius (0.5m)",
+        linewidth=2,
+        label=f"Success Radius ({ENV_CONFIG.docking_success_dist}m)",
     )
-    ax.add_patch(success_circle)
+    ax.add_patch(target_circle)
 
-    ax.set_aspect("equal", "datalim")
-    ax.set_xlabel("Relative X - Radial (m)")
-    ax.set_ylabel("Relative Y - In-Track (m)")
-    ax.set_title("Spacecraft Rendezvous Trajectory (CW Relative Frame)")
+    # Target origin marker
+    ax.plot(0.0, 0.0, "k*", markersize=14, label="Target (0, 0)")
+
+    # Trajectory path line
+    ax.plot(
+        x_coords,
+        y_coords,
+        color="#1f77b4",
+        linewidth=2.0,
+        label="Trajectory (x vs y)",
+    )
+
+    # Start position marker
+    ax.plot(
+        x_coords[0],
+        y_coords[0],
+        "go",
+        markersize=10,
+        label=f"Start ({x_coords[0]:.1f}, {y_coords[0]:.1f})m",
+    )
+
+    # End position marker
+    ax.plot(
+        x_coords[-1],
+        y_coords[-1],
+        "rX",
+        markersize=12,
+        label=f"End ({x_coords[-1]:.1f}, {y_coords[-1]:.1f})m",
+    )
+
+    ax.set_xlabel("Relative X - Radial (m)", fontsize=11)
+    ax.set_ylabel("Relative Y - In-Track (m)", fontsize=11)
+    ax.set_title("Spacecraft Rendezvous Trajectory (CW Relative Frame)", fontsize=13)
     ax.grid(True, linestyle=":", alpha=0.6)
-    ax.legend(loc="best")
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.legend(loc="upper right", frameon=True, facecolor="white", framealpha=0.9)
 
-    # Ensure target output directory exists
-    out_dir = os.path.dirname(output_path)
-    if out_dir:
-        os.makedirs(out_dir, exist_ok=True)
+    # Ensure output directory exists
+    output_dir = Path(output_path).parent
+    if str(output_dir) and str(output_dir) != ".":
+        os.makedirs(output_dir, exist_ok=True)
 
     plt.tight_layout()
-    plt.savefig(output_path, dpi=150)
+    plt.savefig(output_path, bbox_inches="tight")
     plt.close(fig)
 
     print(f"Trajectory plot saved to: {output_path}")
-    return output_path
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Plot Spacecraft Rendezvous Trajectory")
+def parse_args() -> Tuple[str, str, int]:
+    """Parse CLI arguments."""
+    parser = argparse.ArgumentParser(description="Plot Spacecraft Trajectory")
     parser.add_argument(
         "checkpoint_pos",
         nargs="?",
         default=None,
-        help="Path to trained model checkpoint",
+        help="Path to trained model .zip checkpoint",
     )
     parser.add_argument(
         "--checkpoint",
         type=str,
-        default="checkpoints/ppo_spacecraft_final.zip",
-        help="Path to trained model checkpoint",
+        default=None,
+        help="Path to trained model .zip checkpoint",
     )
     parser.add_argument(
         "--output",
         type=str,
         default="eval/trajectory.png",
-        help="Output path for trajectory plot (default: eval/trajectory.png)",
+        help="Output image path (default: eval/trajectory.png)",
     )
     parser.add_argument(
         "--seed",
         type=int,
         default=42,
-        help="Environment initial seed (default: 42)",
+        help="Random seed for trajectory episode (default: 42)",
     )
+
     args = parser.parse_args()
-    ckpt = args.checkpoint_pos or args.checkpoint
+    ckpt = args.checkpoint or args.checkpoint_pos
+    if not ckpt:
+        parser.error("A checkpoint path must be provided via --checkpoint or positional argument.")
     return ckpt, args.output, args.seed
 
 
 if __name__ == "__main__":
-    ckpt_file, out_file, rand_seed = parse_args()
-    plot_trajectory(checkpoint_path=ckpt_file, output_path=out_file, seed=rand_seed)
+    ckpt_path, out_path, traj_seed = parse_args()
+    plot_trajectory(checkpoint_path=ckpt_path, output_path=out_path, seed=traj_seed)
