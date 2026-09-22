@@ -17,26 +17,22 @@ except ImportError:
     from training.train import train
 
 
-def test_run_eval_smoke_end_to_end(capsys):
+def test_run_eval_smoke_end_to_end(tmp_path, capsys):
     """
-    Run run_eval with a 500-timestep smoke checkpoint over 3 episodes.
+    Run run_eval with a 500-timestep smoke checkpoint trained into tmp_path over 3 episodes.
     Asserts:
       - completes end-to-end without error
       - report contains all 4 metrics: success_rate, avg_fuel_used,
         avg_episode_length, safety_overrides_count
       - plain table is printed to stdout
     """
-    # Locate checkpoint from Prompt 3
-    ckpt_path = Path("checkpoints/ppo_spacecraft_final.zip")
+    save_dir = str(tmp_path / "checkpoints")
+    train(total_timesteps=500, save_freq=500, save_dir=save_dir, verbose=0)
+    ckpt_path = Path(save_dir) / "ppo_spacecraft_final.zip"
     if not ckpt_path.exists():
-        ckpt_path = Path("checkpoints/ppo_spacecraft_500_steps.zip")
+        ckpt_path = Path(save_dir) / "ppo_spacecraft_500_steps.zip"
 
-    # If checkpoint doesn't exist, create it via quick 500-step training
-    if not ckpt_path.exists():
-        train(total_timesteps=500, save_freq=500, save_dir="checkpoints", verbose=0)
-        ckpt_path = Path("checkpoints/ppo_spacecraft_final.zip")
-
-    assert ckpt_path.exists(), f"Checkpoint {ckpt_path} could not be found or created."
+    assert ckpt_path.exists(), f"Checkpoint {ckpt_path} could not be created in {save_dir}."
 
     # Run evaluation across 3 episodes
     report = run_eval(checkpoint_path=str(ckpt_path), num_episodes=3)

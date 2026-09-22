@@ -15,14 +15,14 @@ except ImportError:
     from training.train import train
 
 
-def test_train_smoke_500_steps():
+def test_train_smoke_500_steps(tmp_path):
     """
     Run training with total_timesteps=500 and verify:
       (a) completes without error
-      (b) a checkpoint file exists
+      (b) a checkpoint file exists in tmp_path
       (c) reward is never NaN/inf during training
     """
-    save_dir = "checkpoints"
+    save_dir = str(tmp_path / "checkpoints")
     model, reward_tracker = train(
         total_timesteps=500,
         save_freq=500,

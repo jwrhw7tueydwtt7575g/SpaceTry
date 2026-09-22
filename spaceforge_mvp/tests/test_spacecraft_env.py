@@ -112,3 +112,17 @@ def test_reset_then_step_real_call():
     assert isinstance(terminated, (bool, np.bool_))
     assert isinstance(truncated, (bool, np.bool_))
     assert isinstance(step_info, dict)
+
+
+def test_fuel_depletion_sets_truncated_not_terminated():
+    """Test 5: Fuel depletion sets truncated=True and terminated=False (when dist >= 0.5)."""
+    env = SpacecraftEnv()
+    env.reset(seed=42)
+    env.rel_pos = np.array([10.0, 0.0, 0.0], dtype=np.float64)  # dist = 10 >= 0.5
+    env.fuel = 0.0  # Fuel is depleted
+
+    action = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+    obs, reward, terminated, truncated, info = env.step(action)
+
+    assert not terminated, "Fuel depletion should not set terminated=True"
+    assert truncated, "Fuel depletion should set truncated=True"

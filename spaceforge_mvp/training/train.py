@@ -56,6 +56,7 @@ def train(
     save_dir: str = "checkpoints",
     env: Optional[SpacecraftEnv] = None,
     verbose: int = 1,
+    seed: int = 42,
 ) -> Tuple[PPO, RewardTrackerCallback]:
     """
     Train PPO policy on SpacecraftEnv.
@@ -72,6 +73,8 @@ def train(
         Custom environment instance.
     verbose : int
         Verbosity level for PPO logging.
+    seed : int
+        Random seed for environment and PPO model (default: 42).
 
     Returns
     -------
@@ -99,6 +102,7 @@ def train(
         batch_size=64,
         gamma=0.99,
         verbose=verbose,
+        seed=seed,
     )
 
     model.learn(total_timesteps=total_timesteps, callback=callbacks)
@@ -131,6 +135,12 @@ def parse_args() -> argparse.Namespace:
         default="checkpoints",
         help="Directory to save checkpoints (default: checkpoints)",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducible training (default: 42)",
+    )
     return parser.parse_args()
 
 
@@ -140,4 +150,5 @@ if __name__ == "__main__":
         total_timesteps=args.total_timesteps,
         save_freq=args.save_freq,
         save_dir=args.save_dir,
+        seed=args.seed,
     )

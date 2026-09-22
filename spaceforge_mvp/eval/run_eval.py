@@ -45,7 +45,7 @@ def run_eval(
         Dictionary containing success rate, average fuel used,
         average episode length, and safety overrides count.
     """
-    model = PPO.load(checkpoint_path)
+    model = PPO.load(checkpoint_path, seed=seed)
     env = SpacecraftEnv()
 
     success_count = 0
@@ -113,7 +113,7 @@ def print_report_table(report: Dict[str, Any], checkpoint_path: str) -> None:
     print(divider + "\n")
 
 
-def parse_args() -> Tuple[str, int]:
+def parse_args() -> Tuple[str, int, int]:
     """Parse CLI arguments supporting both positional and optional flags."""
     parser = argparse.ArgumentParser(description="Evaluate Spacecraft PPO Checkpoint")
     parser.add_argument(
@@ -134,14 +134,20 @@ def parse_args() -> Tuple[str, int]:
         default=20,
         help="Number of evaluation episodes to run (default: 20)",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for evaluation (default: 42)",
+    )
 
     args = parser.parse_args()
     ckpt = args.checkpoint or args.checkpoint_pos
     if not ckpt:
         parser.error("A checkpoint path must be provided via --checkpoint or positional argument.")
-    return ckpt, args.num_episodes
+    return ckpt, args.num_episodes, args.seed
 
 
 if __name__ == "__main__":
-    ckpt_path, n_episodes = parse_args()
-    run_eval(checkpoint_path=ckpt_path, num_episodes=n_episodes)
+    ckpt_path, n_episodes, eval_seed = parse_args()
+    run_eval(checkpoint_path=ckpt_path, num_episodes=n_episodes, seed=eval_seed)
