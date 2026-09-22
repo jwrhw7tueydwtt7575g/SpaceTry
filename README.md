@@ -2,7 +2,7 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Build Status](https://img.shields.io/badge/tests-38%20passed-brightgreen.svg)]()
+[![Build Status](https://img.shields.io/badge/tests-20%20passed-brightgreen.svg)]()
 
 **SpaceForge** is a simulation-first testbed for autonomous spacecraft rendezvous, proximity operations, and docking (RPO/Docking). It combines orbital relative dynamics, continuous reinforcement learning (PPO), deterministic runtime assurance safety interlocks, and strategic LLM reasoning into a unified control stack.
 
@@ -24,28 +24,32 @@ This repository (`spaceforge-mvp`) houses the **Algorithmic & Control-Theoretic 
 
 ## 1. Overview & What Has Been Done
 
-The `spaceforge-mvp` codebase has been fully scaffolded, implemented, and verified across all core modules with **38 automated unit and integration tests (100% passing)**.
+The `spaceforge-mvp` codebase has been fully scaffolded, implemented, and verified across all core modules with **20 automated unit and integration tests (100% passing)**.
 
 ### Completed MVP Deliverables
 
 ```
 spaceforge-mvp/
+├── pyproject.toml                  <- Standard PEP 517 build configuration (pip install -e .)
 ├── requirements.txt                <- Pinned dependencies (numpy, gymnasium, SB3, pytest, matplotlib)
 ├── README.md                       <- Full architecture & blueprint guide
+├── LICENSE                         <- MIT License file
 ├── checkpoints/                    <- Model checkpoint directory
 └── spaceforge_mvp/
+    ├── config.py                   <- Centralized physics, safety, env parameters
     ├── core/                       <- Clohessy-Wiltshire relative orbital dynamics
-    │   └── cw_dynamics.py          <- cw_accel() + cw_step() (Symplectic Euler)
+    │   └── cw_dynamics.py          <- cw_accel() + cw_step() (Exact CW STM Propagator)
     ├── env/                        <- Gymnasium environment
     │   └── spacecraft_env.py       <- SpacecraftEnv (10-D normalized obs, 3-D continuous action)
     ├── safety/                     <- Mission safety interlock layer (Runtime Assurance)
-    │   └── mission_safety.py       <- evaluate_goal() priority-ordered safety gate
+    │   └── mission_safety.py       <- evaluate_goal() directional braking safety gate
     ├── training/                   <- Reinforcement learning training script
     │   └── train.py                <- PPO training loop with CheckpointCallback & seed support
     ├── eval/                       <- Policy evaluation & visualization
     │   ├── run_eval.py             <- Multi-episode tabular evaluator
     │   └── plot_trajectory.py      <- Matplotlib 2D trajectory generator (eval/trajectory.png)
-    └── tests/                      <- Full test suite (38 test cases)
+    └── tests/                      <- Full test suite (20 test cases)
+        ├── conftest.py
         ├── test_cw_dynamics.py
         ├── test_spacecraft_env.py
         ├── test_mission_safety.py
@@ -57,28 +61,29 @@ spaceforge-mvp/
 
 #### Detailed Module Breakdown:
 - **Orbital Dynamics (`spaceforge_mvp/core/cw_dynamics.py`)**:
-  - Implements Clohessy-Wiltshire (Hill's) relative motion equations in Hill's frame (radial $x$, in-track $y$, cross-track $z$):
-    $$a_x = 2n v_y + 3n^2 x, \quad a_y = -2n v_x, \quad a_z = -n^2 z$$
-  - Integrates state via **Symplectic (Semi-Implicit) Euler** integration: updates velocity first, then position using updated velocity to preserve orbital energy invariants.
-  - Verified by hand-calculated unit test cases checked to $10^{-9}$ precision.
+  - Implements Clohessy-Wiltshire (Hill's) relative motion equations in Hill's frame (radial `x`, in-track `y`, cross-track `z`):
+    `ax = 2*n*vy + 3*n^2*x`, `ay = -2*n*vx`, `az = -n^2*z`
+  - Integrates state via the **Exact 6x6 Clohessy-Wiltshire State Transition Matrix (STM)** analytical propagator:
+    `X(t) = Phi(t) * X(0) + Gamma(t) * u`
+  - Preserves orbital energy invariants and analytical exactness independent of timestep size `dt`.
 
 - **Gymnasium Environment (`spaceforge_mvp/env/spacecraft_env.py`)**:
-  - **10-D State Observation**: Normalized position ($\text{rel\_pos} / 20.0$), normalized velocity ($\text{rel\_vel} / 2.0$), fuel fraction ($[0,1]$), elapsed time, and 2D target bearing unit vector.
-  - **3-D Continuous Action Space**: Commanded acceleration $u = [a_x, a_y, a_z] \in [-1, 1]\text{ m/s}^2$.
+  - **10-D State Observation**: Normalized position (`rel_pos / 20.0`), normalized velocity (`rel_vel / 2.0`), fuel fraction (`[0, 1]`), normalized time (`time / 300`), and 2D target bearing unit vector.
+  - **3-D Continuous Action Space**: Commanded acceleration `u = [ax, ay, az]` in `[-1.0, 1.0]` m/s².
   - **Potential-Based Reward Shaping**:
-    $$\text{Reward} = 5.0 \cdot (d_{\text{prev}} - d_{\text{curr}}) - 0.5 \lVert v \rVert - 0.01 \sum |u_i| + (100 \text{ if } d_{\text{curr}} < 0.5)$$
-  - **Resource Truncation**: Out-of-fuel ($\text{fuel} \le 0$) and time limits ($300\text{ steps}$) trigger `truncated=True`, reserving `terminated=True` strictly for successful docking ($d < 0.5\text{m}$).
+    `Reward = 5.0 * (dist_prev - dist_curr) - 0.5 * speed - 0.01 * sum(|u|) + (100 if dist < 0.5 and speed < 0.1 else 0)`
+  - **Speed-Gated Docking & Truncation**: Reaching `terminated=True` requires `dist < 0.5m` AND `speed < 0.1m/s`. Resource exhaustion (fuel <= 0 or time >= 300) sets `truncated=True`.
 
 - **Runtime Assurance Safety Interlock (`spaceforge_mvp/safety/mission_safety.py`)**:
-  - Priority 1: $\text{fuel} < 0.05 \implies \text{emergency\_hold}$ (Fuel floor override).
-  - Priority 2: $\text{goal} == \text{"APPROACH"}$, $\text{dist} < 5.0\text{m}$, AND $\text{speed} > 0.2\text{m/s} \implies \text{rejected}$ (Safe approach speed gate).
-  - Priority 3: Otherwise $\implies \text{accepted}$.
-  - Seamlessly wired into `SpacecraftEnv.step()`: zeroes out commanded actions when safety interlock triggers, setting `info["safety_override"]`.
+  - Priority 1: `fuel < 0.05` -> `emergency_hold` (Fuel floor override).
+  - Priority 2: `goal == "APPROACH"`, `dist < 5.0m`, AND `speed > 0.2m/s`:
+    Permits braking/decelerating thrust vectors (`u dot v <= 0`) inside 5m to resolve braking deadlocks, rejecting only accelerating thrust.
+  - Priority 3: Otherwise -> `accepted`.
 
 - **Training, Evaluation & Visualization (`spaceforge_mvp/training`, `spaceforge_mvp/eval`)**:
-  - `train.py`: SB3 PPO training with configurable timesteps, seed support, and `CheckpointCallback`.
-  - `run_eval.py`: Evaluates policy across $N$ episodes, outputting success rate, average fuel used, episode length, and safety override counts in a clean table.
-  - `plot_trajectory.py`: Generates static 2D relative trajectory plots ($x$ radial vs $y$ in-track) with start/end markers, target origin star, and a dashed $0.5\text{m}$ success circle.
+  - `train.py`: SB3 PPO training with configurable timesteps, seed support, TensorBoard logging, and `CheckpointCallback`.
+  - `run_eval.py`: Evaluates policy across N episodes, checking both distance and docking speed criteria.
+  - `plot_trajectory.py`: Generates static 2D relative trajectory plots (`x` radial vs `y` in-track) saved to `eval/trajectory.png`.
 
 ---
 
@@ -119,7 +124,7 @@ flowchart TD
 
 ## 3. Full Production Architecture (Blueprint Reference)
 
-*Reference: `SpaceForge_End_to_End_Blueprint.pdf` (5-Layer Architectural Design)*
+*Reference: SpaceForge End-to-End Blueprint (5-Layer Architectural Design)*
 
 While `spaceforge-mvp` focuses on numerical physics and policy optimization, the full SpaceForge system extends into a **5-Layer Production Robotics Stack** instantiated as **7 concrete ROS 2 nodes**:
 
@@ -166,7 +171,7 @@ flowchart TD
 | **Safety Interlock** | `mission_ctrl` | Deterministic goal arbitration layer validating safety bounds. |
 | **Layer 4 — Control** | `rl_env`, `rl_trainer` | Gymnasium wrapper + PPO/SAC continuous thrust policy. |
 | **Layer 3 — Perception** | `perception` | YOLOv8 2D detector + OpenCV `solvePnP` 3D target pose estimator. |
-| **Layer 2 — Middleware** | `sim_bridge` | ROS 2 $\leftrightarrow$ Gazebo Harmonic topic and service translation. |
+| **Layer 2 — Middleware** | `sim_bridge` | ROS 2 / Gazebo Harmonic topic and service translation. |
 | **Layer 1 — Simulation** | `Gazebo Harmonic` | High-fidelity physics, sensor rendering, and C++ CW system plugins. |
 | **Orchestration Tier** | `auto_trainer`, `web_bridge` | Optuna HPO, curriculum manager, and React/Three.js web dashboard. |
 
@@ -236,7 +241,7 @@ The operational loop operates across strategic reasoning, tactical control, and 
 
 *Extracted from Section 7 & 8 of the SpaceForge End-to-End Blueprint.*
 
-The full 12-month build sequence follows a strict **bottom-up engineering order**:
+The full build sequence follows a strict **bottom-up engineering order**:
 
 ```
 Phase 1: Foundation ──> Phase 2: Control Core ──> Phase 3: Perception & Cognition ──> Phase 4: Auto-Training ──> Phase 5: Observability ──> Phase 6: Hardening
@@ -244,33 +249,33 @@ Phase 1: Foundation ──> Phase 2: Control Core ──> Phase 3: Perception & 
 
 ### Phase Breakdown
 
-#### Phase 1 — Foundation (Months 1–2)
+#### Phase 1 — Foundation
 - Build Gazebo `leo_orbit.sdf` world and `chaser_sat` / `target_sat` SDF models.
 - Implement C++ `orbital_dynamics.cc` Gazebo system plugin for CW motion.
 - Implement `sim_bridge` node publishing `/spacecraft/odom`, `/spacecraft/imu`, `/camera/image_raw`.
 
-#### Phase 2 — Control Core (Months 3–4)
+#### Phase 2 — Control Core
 - Port numerical `SpacecraftEnv` into a ROS 2 live-sim Gymnasium wrapper.
 - Configure `rl_trainer` node running SB3 PPO/SAC with `SubprocVecEnv` across parallel Gazebo instances.
 - Achieve Stage-1 curriculum 1-D approach convergence.
 
-#### Phase 3 — Perception & Cognition (Months 5–6)
+#### Phase 3 — Perception & Cognition
 - Build `perception` node combining YOLOv8 bounding box detection with OpenCV `solvePnP` pose estimation.
 - Integrate ROS 2 `mission_ctrl` safety interlock node.
 - Build LangChain `llm_planner` tool-calling agent with `PlaybookManager` for dynamic prompt adaptation.
 
-#### Phase 4 — Auto-Training & HPO (Months 7–8)
+#### Phase 4 — Auto-Training & HPO
 - Build `curriculum_manager` node with threshold-based 5-stage advancement.
 - Integrate Optuna SQLite-backed study for automated hyperparameter tuning (learning rate, batch size, clip range).
 
-#### Phase 5 — Observability Tier (Months 9–10)
+#### Phase 5 — Observability Tier
 - Build `web_bridge` WebSocket telemetry server.
 - Construct React + Three.js web dashboard rendering live 3D orbital trajectories, TensorBoard graphs, and LLM reasoning traces.
 
-#### Phase 6 — Hardening & Sim-to-Real (Months 11–12)
-- Domain randomization: spacecraft mass/inertia ($\pm 20\%$), thruster noise ($\pm 10\%$).
+#### Phase 6 — Hardening & Sim-to-Real
+- Domain randomization: spacecraft mass/inertia (+/- 20%), thruster noise (+/- 10%).
 - Sensor noise injection (IMU Gaussian noise, camera lens distortion).
-- Communication latency simulation ($1\text{ms}$–$10\text{ms}$).
+- Communication latency simulation (1ms to 10ms).
 - Hardware-In-The-Loop (HIL) prep and open-source release.
 
 ---
@@ -281,26 +286,26 @@ To ensure policy stability, training follows a 5-stage curriculum managed by `cu
 
 | Stage | Scenario Name | Starting Distance | Max Relative Velocity | Success Threshold |
 |---|---|---|---|---|
-| **Stage 1** | 1-D Radial Approach | $5.0\text{ m}$ (1-D) | $0.05\text{ m/s}$ | 90% Success Rate |
-| **Stage 2** | 3-D Point Rendezvous | $20.0\text{ m}$ (3-D) | $0.10\text{ m/s}$ | 85% Success Rate |
-| **Stage 3** | Tumbling Target Docking | $10.0\text{ m}$ (Spinning target) | $0.20\text{ m/s}$ | 75% Success Rate |
-| **Stage 4** | Debris Field Avoidance | $30.0\text{ m}$ (Obstacles present) | $0.25\text{ m/s}$ | 70% Success Rate |
-| **Stage 5** | Multi-Surface Inspection | $50.0\text{ m}$ (Complex trajectory) | $0.30\text{ m/s}$ | 65% Success Rate |
+| **Stage 1** | 1-D Radial Approach | 5.0 m (1-D) | 0.05 m/s | 90% Success Rate |
+| **Stage 2** | 3-D Point Rendezvous | 20.0 m (3-D) | 0.10 m/s | 85% Success Rate |
+| **Stage 3** | Tumbling Target Docking | 10.0 m (Spinning target) | 0.20 m/s | 75% Success Rate |
+| **Stage 4** | Debris Field Avoidance | 30.0 m (Obstacles present) | 0.25 m/s | 70% Success Rate |
+| **Stage 5** | Multi-Surface Inspection | 50.0 m (Complex trajectory) | 0.30 m/s | 65% Success Rate |
 
 ---
 
 ## 8. Quick-Start & Command Reference
 
-### 1. Environment Setup & Installation
+### 1. Environment Setup & Editable Package Installation
 ```bash
-git clone https://github.com/your-org/spaceforge-mvp.git
-cd spaceforge-mvp
+git clone https://github.com/jwrhw7tueydwtt7575g/SpaceTry.git
+cd SpaceTry
 
-# Install dependencies (pinned exact versions)
-pip install -r requirements.txt
+# Install package in editable mode
+pip install -e .
 ```
 
-### 2. Run Full Test Gate (38 Tests)
+### 2. Run Full Test Gate (20 Unique Tests)
 ```bash
 pytest -v
 ```
@@ -339,6 +344,6 @@ Distributed under the **MIT License**.
   year = {2026},
   publisher = {GitHub},
   journal = {GitHub Repository},
-  howpublished = {\url{https://github.com/your-org/spaceforge-mvp}}
+  howpublished = {\url{https://github.com/jwrhw7tueydwtt7575g/SpaceTry}}
 }
 ```
