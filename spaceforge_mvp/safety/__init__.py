@@ -1,5 +1,5 @@
 """Mission safety layer module."""
 
-from .mission_safety import FUEL_FLOOR, SAFE_APPROACH_DIST, evaluate_goal
+from .mission_safety import FUEL_FLOOR, MAX_SAFE_CLOSING_SPEED, SAFE_APPROACH_DIST, evaluate_goal
 
-__all__ = ["evaluate_goal", "SAFE_APPROACH_DIST", "FUEL_FLOOR"]
+__all__ = ["evaluate_goal", "SAFE_APPROACH_DIST", "FUEL_FLOOR", "MAX_SAFE_CLOSING_SPEED"]

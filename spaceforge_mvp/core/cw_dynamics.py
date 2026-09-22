@@ -43,7 +43,7 @@ def cw_accel(pos, vel, n: float = 0.00113) -> np.ndarray:
 
 def cw_step(pos, vel, accel_cmd, dt: float, n: float = 0.00113):
     """
-    Integrate relative spacecraft state over a single timestep using Euler integration.
+    Integrate relative spacecraft state over a single timestep using semi-implicit (symplectic) Euler integration.
 
     Parameters
     ----------
@@ -70,7 +70,8 @@ def cw_step(pos, vel, accel_cmd, dt: float, n: float = 0.00113):
     a_cw = cw_accel(pos_arr, vel_arr, n=n)
     a_total = a_cw + cmd_arr
 
-    next_pos = pos_arr + vel_arr * dt
+    # Symplectic / Semi-Implicit Euler: update velocity first, then position using new velocity
     next_vel = vel_arr + a_total * dt
+    next_pos = pos_arr + next_vel * dt
 
     return next_pos, next_vel
