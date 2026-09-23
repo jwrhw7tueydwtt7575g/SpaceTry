@@ -1,6 +1,12 @@
-"""Centralized configuration parameters for SpaceForge MVP."""
+"""Centralized configuration parameters for SpaceForge MVP.
+
+The immutable physics/safety/environment configs contain model parameters.  A
+``MissionConfig`` contains per-run values and is deliberately passed into the
+environment instead of being hidden in module globals.
+"""
 
 from dataclasses import dataclass
+from typing import Tuple
 
 
 @dataclass(frozen=True)
@@ -35,6 +41,38 @@ class EnvConfig:
     velocity_penalty_weight: float = 0.5
     action_penalty_weight: float = 0.01
     docking_bonus: float = 100.0
+
+
+@dataclass(frozen=True)
+class MissionConfig:
+    """Inputs that define one simulation or evaluation run.
+
+    Positions and velocities are expressed in the same Hill-frame coordinate
+    system.  The dynamics use the derived target-relative state.
+    """
+
+    start_pos: Tuple[float, float, float]
+    target_pos: Tuple[float, float, float]
+    start_vel: Tuple[float, float, float]
+    target_vel: Tuple[float, float, float]
+    initial_fuel: float
+    duration: float
+    dt: float
+    mean_motion: float
+    safety_mode: str = "v1"
+    goal_type: str = "APPROACH"
+
+    @property
+    def relative_pos(self) -> Tuple[float, float, float]:
+        return tuple(a - b for a, b in zip(self.start_pos, self.target_pos))
+
+    @property
+    def relative_vel(self) -> Tuple[float, float, float]:
+        return tuple(a - b for a, b in zip(self.start_vel, self.target_vel))
+
+    @property
+    def max_steps(self) -> int:
+        return max(1, int(round(self.duration / self.dt)))
 
 
 # Instantiated global config objects

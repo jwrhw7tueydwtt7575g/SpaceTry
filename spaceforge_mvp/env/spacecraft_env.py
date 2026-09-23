@@ -31,7 +31,8 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
-from spaceforge_mvp.config import ENV_CONFIG, PHYSICS_CONFIG, SAFETY_CONFIG
+from spaceforge_mvp.config import ENV_CONFIG, PHYSICS_CONFIG, SAFETY_CONFIG, MissionConfig
+from spaceforge_mvp.control.rta import apply_safety_filter
 from spaceforge_mvp.core.cw_dynamics import cw_step
 from spaceforge_mvp.safety.mission_safety import evaluate_goal
 
@@ -52,12 +53,18 @@ class SpacecraftEnv(gym.Env):
 
     def __init__(
         self,
-        max_steps: int = ENV_CONFIG.max_steps,
+        max_steps: Optional[int] = None,
         render_mode: Optional[str] = None,
+        mission: Optional[MissionConfig] = None,
+        safety_mode: Optional[str] = None,
     ) -> None:
         super().__init__()
         self.render_mode = render_mode
-        self.max_steps = int(max_steps)
+        self.mission = mission
+        self.max_steps = int(max_steps or (mission.max_steps if mission else ENV_CONFIG.max_steps))
+        self.safety_mode = safety_mode or (mission.safety_mode if mission else "v1")
+        if self.safety_mode not in {"off", "v1", "v2"}:
+            raise ValueError("safety_mode must be one of: off, v1, v2")
 
         # Observation values are unbounded in principle (a diverging policy can
         # fly arbitrarily far), so declare the box accordingly instead of
@@ -72,7 +79,7 @@ class SpacecraftEnv(gym.Env):
         # --- mutable episode state ---
         self.rel_pos: np.ndarray = np.zeros(3, dtype=np.float64)
         self.rel_vel: np.ndarray = np.zeros(3, dtype=np.float64)
-        self.fuel: float = 1.0
+        self.fuel: float = float(mission.initial_fuel if mission else 1.0)
         self.step_count: int = 0
 
     # ------------------------------------------------------------------ helpers
@@ -130,16 +137,16 @@ class SpacecraftEnv(gym.Env):
         """Draw a fresh random relative state and return (obs, info)."""
         super().reset(seed=seed)
 
-        pos_bound = ENV_CONFIG.initial_pos_bound
-        vel_bound = ENV_CONFIG.initial_vel_bound
-
-        self.rel_pos = self.np_random.uniform(-pos_bound, pos_bound, size=3).astype(
-            np.float64
-        )
-        self.rel_vel = self.np_random.uniform(-vel_bound, vel_bound, size=3).astype(
-            np.float64
-        )
-        self.fuel = 1.0
+        if self.mission is None:
+            pos_bound = ENV_CONFIG.initial_pos_bound
+            vel_bound = ENV_CONFIG.initial_vel_bound
+            self.rel_pos = self.np_random.uniform(-pos_bound, pos_bound, size=3).astype(np.float64)
+            self.rel_vel = self.np_random.uniform(-vel_bound, vel_bound, size=3).astype(np.float64)
+            self.fuel = 1.0
+        else:
+            self.rel_pos = np.asarray(self.mission.relative_pos, dtype=np.float64)
+            self.rel_vel = np.asarray(self.mission.relative_vel, dtype=np.float64)
+            self.fuel = float(self.mission.initial_fuel)
         self.step_count = 0
 
         dist = float(np.linalg.norm(self.rel_pos))
@@ -168,30 +175,37 @@ class SpacecraftEnv(gym.Env):
         dist_prev = float(np.linalg.norm(self.rel_pos))
         speed_prev = float(np.linalg.norm(self.rel_vel))
 
-        verdict = evaluate_goal(
-            goal_type=APPROACH_GOAL,
-            current_dist=dist_prev,
-            fuel_remaining=float(self.fuel),
-            current_speed=speed_prev,
-            commanded_action=cmd,
-            rel_vel=np.asarray(self.rel_vel, dtype=np.float64),
-        )
-        status = str(verdict["status"])
-
-        if status == "accepted":
+        goal_type = self.mission.goal_type if self.mission else APPROACH_GOAL
+        if self.safety_mode == "off":
             applied = cmd
-            override: Optional[str] = None
+            override = None
+            safety_reason = "Safety interlock disabled."
+        elif self.safety_mode == "v2":
+            decision = apply_safety_filter(cmd, self.rel_pos, self.rel_vel, self.fuel, goal_type)
+            applied = np.asarray(decision["applied"], dtype=np.float64)
+            override = decision["override"]
+            safety_reason = str(decision["reason"])
         else:
-            # emergency_hold or rejected: thrust is zeroed for this step.
-            applied = np.zeros(3, dtype=np.float64)
-            override = status
+            verdict = evaluate_goal(
+                goal_type=goal_type,
+                current_dist=dist_prev,
+                fuel_remaining=float(self.fuel),
+                current_speed=speed_prev,
+                commanded_action=cmd,
+                rel_vel=np.asarray(self.rel_vel, dtype=np.float64),
+            )
+            status = str(verdict["status"])
+            applied = cmd if status == "accepted" else np.zeros(3, dtype=np.float64)
+            override = None if status == "accepted" else status
+            safety_reason = str(verdict["reason"])
 
         # --- physics: exact CW state transition matrix ---
         next_pos, next_vel = cw_step(
             self.rel_pos,
             self.rel_vel,
             applied * MAX_CMD_ACCEL,
-            dt=PHYSICS_CONFIG.dt,
+            dt=self.mission.dt if self.mission else PHYSICS_CONFIG.dt,
+            n=self.mission.mean_motion if self.mission else PHYSICS_CONFIG.n,
         )
         self.rel_pos = np.asarray(next_pos, dtype=np.float64)
         self.rel_vel = np.asarray(next_vel, dtype=np.float64)
@@ -227,6 +241,6 @@ class SpacecraftEnv(gym.Env):
             is_success=is_success,
             safety_override=override,
             applied_action=applied,
-            safety_reason=str(verdict["reason"]),
+            safety_reason=safety_reason,
         )
         return self._get_obs(), float(reward), terminated, truncated, info

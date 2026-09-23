@@ -11,11 +11,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from spaceforge_mvp.config import ENV_CONFIG, PHYSICS_CONFIG, SAFETY_CONFIG
-from spaceforge_mvp.control.rta import apply_safety_filter
+from spaceforge_mvp.config import ENV_CONFIG, PHYSICS_CONFIG, SAFETY_CONFIG, MissionConfig
 from spaceforge_mvp.core.cw_dynamics import cw_step
 from spaceforge_mvp.env.spacecraft_env import SpacecraftEnv
-from spaceforge_mvp.safety.mission_safety import evaluate_goal
 
 Controller = Callable[[np.ndarray, np.ndarray], np.ndarray]
 
@@ -51,6 +49,7 @@ def _frame(
 def replay_continuous_min(
     frames: List[Dict[str, Any]],
     sub_dt: float = 0.01,
+    interval_dt: float = PHYSICS_CONFIG.dt,
 ) -> Tuple[float, float]:
     """True minimum range, replaying the recorded commands at sub-sample resolution.
 
@@ -64,7 +63,7 @@ def replay_continuous_min(
     vel = np.asarray(frames[0]["vel"], dtype=np.float64).copy()
     best_dist = float(np.linalg.norm(pos))
     best_speed = float(np.linalg.norm(vel))
-    n_sub = max(1, int(round(PHYSICS_CONFIG.dt / sub_dt)))
+    n_sub = max(1, int(round(interval_dt / sub_dt)))
 
     for f in frames[1:]:
         applied = np.asarray(f["applied"], dtype=np.float64)
@@ -85,6 +84,7 @@ def record_episode(
     max_steps: int = ENV_CONFIG.max_steps,
     annotate_continuous: bool = False,
     goal_type: str = "APPROACH",
+    mission: Optional[MissionConfig] = None,
 ) -> Dict[str, Any]:
     """Roll out one episode and return a full telemetry trace.
 
@@ -101,11 +101,26 @@ def record_episode(
     annotate_continuous : bool
         Also compute the continuous-time closest approach (fine sub-stepping).
     """
-    env = SpacecraftEnv(max_steps=max_steps)
+    if mission is None:
+        if initial is None:
+            env = SpacecraftEnv(max_steps=max_steps, safety_mode=safety)
+        else:
+            mission = MissionConfig(
+                start_pos=tuple(np.asarray(initial[0], dtype=float)),
+                target_pos=(0.0, 0.0, 0.0),
+                start_vel=tuple(np.asarray(initial[1], dtype=float)),
+                target_vel=(0.0, 0.0, 0.0),
+                initial_fuel=1.0,
+                duration=max_steps * PHYSICS_CONFIG.dt,
+                dt=PHYSICS_CONFIG.dt,
+                mean_motion=PHYSICS_CONFIG.n,
+                safety_mode=safety,
+                goal_type=goal_type,
+            )
+            env = SpacecraftEnv(mission=mission)
+    else:
+        env = SpacecraftEnv(mission=mission, safety_mode=safety)
     env.reset(seed=seed)
-    if initial is not None:
-        env.rel_pos = np.asarray(initial[0], dtype=np.float64).copy()
-        env.rel_vel = np.asarray(initial[1], dtype=np.float64).copy()
 
     start_dist = float(np.linalg.norm(env.rel_pos))
     frames: List[Dict[str, Any]] = []
@@ -124,56 +139,26 @@ def record_episode(
     snap(0.0, np.zeros(3), np.zeros(3), None)
 
     step = 0
-    while step < max_steps:
+    while step < env.max_steps:
         cmd = np.clip(np.asarray(controller(env.rel_pos, env.rel_vel), dtype=np.float64).reshape(3), -1.0, 1.0)
-
-        if safety == "off":
-            applied, override = cmd, None
-        elif safety == "v2":
-            decision = apply_safety_filter(
-                commanded_action=cmd,
-                rel_pos=env.rel_pos,
-                rel_vel=env.rel_vel,
-                fuel_remaining=float(env.fuel),
-                goal_type=goal_type,
-            )
-            applied = np.asarray(decision["applied"], dtype=np.float64)
-            override = decision["override"]
-            if override is not None:
-                overrides += 1
-        else:
-            verdict = evaluate_goal(
-                goal_type=goal_type,
-                current_dist=float(np.linalg.norm(env.rel_pos)),
-                fuel_remaining=float(env.fuel),
-                current_speed=float(np.linalg.norm(env.rel_vel)),
-                commanded_action=cmd,
-                rel_vel=np.asarray(env.rel_vel, dtype=np.float64),
-            )
-            status = str(verdict["status"])
-            if status == "accepted":
-                applied, override = cmd, None
-            else:
-                applied, override = np.zeros(3), status
-                overrides += 1
-
-        next_pos, next_vel = cw_step(env.rel_pos, env.rel_vel, applied, dt=PHYSICS_CONFIG.dt)
-        env.rel_pos = np.asarray(next_pos, dtype=np.float64)
-        env.rel_vel = np.asarray(next_vel, dtype=np.float64)
-        mag = float(np.sum(np.abs(applied)))
-        dv += mag
-        env.fuel = max(0.0, float(env.fuel) - ENV_CONFIG.fuel_rate_scale * mag)
+        _, _, terminated, truncated, info = env.step(cmd)
+        applied = np.asarray(info["applied_action"], dtype=np.float64)
+        override = info.get("safety_override")
+        if override is not None:
+            overrides += 1
+        dv += float(np.sum(np.abs(applied)))
         step += 1
 
         dist = float(np.linalg.norm(env.rel_pos))
         speed = float(np.linalg.norm(env.rel_vel))
         min_dist = min(min_dist, dist)
-        snap(step * PHYSICS_CONFIG.dt, cmd, applied, override)
+        step_dt = mission.dt if mission else PHYSICS_CONFIG.dt
+        snap(step * step_dt, cmd, applied, override)
 
-        if dist < ENV_CONFIG.docking_success_dist and speed < SAFETY_CONFIG.max_docking_speed:
+        if terminated:
             terminal_reason = "docked"
             break
-        if env.fuel <= 0.0:
+        if truncated and env.fuel <= 0.0:
             terminal_reason = "fuel"
             break
 
@@ -187,15 +172,17 @@ def record_episode(
         "end_speed": round(float(np.linalg.norm(env.rel_vel)), 4),
         "success": terminal_reason == "docked",
         "steps": step,
-        "duration": round(step * PHYSICS_CONFIG.dt, 2),
-        "fuel_used": round(1.0 - float(env.fuel), 5),
+        "duration": round(step * (mission.dt if mission else PHYSICS_CONFIG.dt), 2),
+        "fuel_used": round((mission.initial_fuel if mission else 1.0) - float(env.fuel), 5),
         "dv": round(dv, 4),
         "overrides": overrides,
         "terminal_reason": terminal_reason,
     }
 
     if annotate_continuous:
-        best_d, best_v = replay_continuous_min(frames)
+        best_d, best_v = replay_continuous_min(
+            frames, interval_dt=mission.dt if mission else PHYSICS_CONFIG.dt
+        )
         summary["continuous_min_dist"] = round(best_d, 4)
         summary["continuous_min_speed"] = round(best_v, 4)
         summary["penetrated"] = bool(

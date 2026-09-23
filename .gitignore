@@ -46,3 +46,4 @@ tensorboard_logs/
 # Kept out of history on purpose: ~16 MB of binaries regenerated in ~8 minutes
 # from the committed scenario traces.
 spaceforge_mvp/viz/videos/
+runs/

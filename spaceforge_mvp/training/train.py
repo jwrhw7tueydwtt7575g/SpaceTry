@@ -14,6 +14,7 @@ from stable_baselines3.common.callbacks import (
 )
 from stable_baselines3.common.monitor import Monitor
 
+from spaceforge_mvp.config import MissionConfig
 from spaceforge_mvp.env.spacecraft_env import SpacecraftEnv
 
 
@@ -164,15 +165,41 @@ def parse_args() -> argparse.Namespace:
         default=42,
         help="Random seed for reproducible training (default: 42)",
     )
+    parser.add_argument("--start-pos", nargs=3, type=float, metavar=("X", "Y", "Z"))
+    parser.add_argument("--target-pos", nargs=3, type=float, metavar=("X", "Y", "Z"))
+    parser.add_argument("--start-vel", nargs=3, type=float, metavar=("VX", "VY", "VZ"))
+    parser.add_argument("--target-vel", nargs=3, type=float, metavar=("VX", "VY", "VZ"))
+    parser.add_argument("--fuel", type=float)
+    parser.add_argument("--duration", type=float)
+    parser.add_argument("--dt", type=float)
+    parser.add_argument("--mean-motion", type=float)
+    parser.add_argument("--safety", choices=("off", "v1", "v2"), default="v1")
+    parser.add_argument("--goal", default="APPROACH")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
+    mission_values = (args.start_pos, args.target_pos, args.start_vel, args.target_vel,
+                      args.fuel, args.duration, args.dt, args.mean_motion)
+    if any(value is not None for value in mission_values) and not all(value is not None for value in mission_values):
+        raise SystemExit("When configuring a fixed training mission, provide all position, velocity, fuel, duration, dt, and mean-motion flags.")
+    training_env = None
+    if all(value is not None for value in mission_values):
+        if not 0.0 <= args.fuel <= 1.0 or args.duration <= 0 or args.dt <= 0 or args.mean_motion <= 0:
+            raise SystemExit("fuel must be in [0, 1]; duration, dt, and mean-motion must be positive.")
+        mission = MissionConfig(
+            start_pos=tuple(args.start_pos), target_pos=tuple(args.target_pos),
+            start_vel=tuple(args.start_vel), target_vel=tuple(args.target_vel),
+            initial_fuel=args.fuel, duration=args.duration, dt=args.dt,
+            mean_motion=args.mean_motion, safety_mode=args.safety, goal_type=args.goal,
+        )
+        training_env = SpacecraftEnv(mission=mission)
     train(
         total_timesteps=args.total_timesteps,
         save_freq=args.save_freq,
         save_dir=args.save_dir,
         tensorboard_log=args.tensorboard_log,
         seed=args.seed,
+        env=training_env,
     )
