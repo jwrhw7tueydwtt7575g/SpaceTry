@@ -1,5 +1,16 @@
 # SpaceForge — Autonomous Spacecraft Rendezvous & Docking Framework
 
+> **Status — read `MVP_SUMMARY.md` before the rest of this file.**
+> This repository is the author's `spaceforge-mvp` snapshot with work added on top: the Gymnasium
+> environment module that was never committed, a certified reference guidance law, a
+> runtime-assurance filter that brakes instead of vetoing, a telemetry recorder, three rendered
+> videos and an interactive dashboard. `MVP_SUMMARY.md` is the source of truth for what works and
+> what does not. Three claims below do **not** match the shipped code, and `CRITIQUE.md` has the
+> evidence for each: the "tests: 20 passed" badge is a static image with no CI behind it (on a fresh
+> clone `pytest` aborts with 5 collection errors and runs nothing); the shipped PPO checkpoint
+> scores **0 successes in 50 episodes**; and the ROS 2 / Gazebo / YOLOv8 / LangChain layers are a
+> blueprint for a production system, not code in this repository.
+
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Build Status](https://img.shields.io/badge/tests-20%20passed-brightgreen.svg)]()
