@@ -29,12 +29,20 @@ htmlcov/
 # Environments
 .env
 .venv
-env/
-venv/
-ENV/
+# NOTE: anchored with a leading slash on purpose. Bare `env/` matches a directory
+# of that name at ANY depth, which silently swallowed spaceforge_mvp/env/ — the
+# Gymnasium environment package. Never un-anchor these.
+/env/
+/venv/
+/ENV/
 
 # Checkpoint binaries & intermediate test outputs
 checkpoints/ppo_spacecraft_[0-9]*.zip
 *.png
 logs/
 tensorboard_logs/
+
+# Rendered media — rebuild with viz/make_videos.py, see INSTRUCTIONS.md.
+# Kept out of history on purpose: ~16 MB of binaries regenerated in ~8 minutes
+# from the committed scenario traces.
+spaceforge_mvp/viz/videos/
