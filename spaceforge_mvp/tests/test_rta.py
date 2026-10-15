@@ -7,7 +7,6 @@ fly-through into a soft capture.
 """
 
 import numpy as np
-import pytest
 
 from spaceforge_mvp.config import ENV_CONFIG, PHYSICS_CONFIG
 from spaceforge_mvp.control.glideslope import hot_approach_action

@@ -447,7 +447,6 @@ def _draw_frame(fig, ax, tracks: List[Track], idx: int, rng, scale, title, subti
 
     _draw_grid(ax, px, py, _nice_step(hh), hw, hh)
 
-    max_range = max(f["dist"] for _, f, _ in cur)
     if KEEP_OUT * px_per_m > 34.0:
         _draw_ring(ax, KEEP_OUT, AMBER, f"keep-out {KEEP_OUT:g} m", (0, (6, 4)), 0.55, px_per_m)
     _draw_ring(ax, SUCCESS_DIST, GREEN, f"capture {SUCCESS_DIST:g} m", (0, (2, 2)), 0.8, px_per_m)

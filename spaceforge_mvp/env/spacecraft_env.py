@@ -16,9 +16,11 @@ Observation (10,) float32:
 Action (3,) float32 in [-1, 1]:
     commanded acceleration [ax, ay, az] in m/s^2 (scaled by MAX_CMD_ACCEL)
 
-Reward:
-    5.0 * (dist_prev - dist_curr) - 0.5 * speed - 0.01 * sum(|u_applied|)
-    plus ENV_CONFIG.docking_bonus on a successful dock.
+Reward components are reported in ``info["reward_breakdown"]``.  Position terms
+    use metres, velocity uses metres/sec, effort uses normalized actuator command,
+    fuel uses consumed fuel fraction, and collision risk is dimensionless.  The
+    configured weights are progress, divergence, velocity, fuel, effort, risk,
+    and docking success respectively; their sum is the scalar reward.
 
 Episode ends:
     terminated=True  -> dist < docking_success_dist AND speed < max_docking_speed
@@ -31,13 +33,10 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
-from spaceforge_mvp.config import ENV_CONFIG, PHYSICS_CONFIG, SAFETY_CONFIG, MissionConfig
+from spaceforge_mvp.config import ENV_CONFIG, PHYSICS_CONFIG, SAFETY_CONFIG, ActuatorConfig, DomainConfig, FaultConfig, MissionConfig, RunConfig
 from spaceforge_mvp.control.rta import apply_safety_filter
 from spaceforge_mvp.core.cw_dynamics import cw_step
 from spaceforge_mvp.safety.mission_safety import evaluate_goal
-
-# Action is bounded to [-1, 1]; this converts it to a commanded acceleration in m/s^2.
-MAX_CMD_ACCEL: float = 1.0
 
 # Goal string handed to the safety interlock. The MVP only ever flies APPROACH,
 # which is the goal type the proximity speed gate is keyed on.
@@ -57,12 +56,23 @@ class SpacecraftEnv(gym.Env):
         render_mode: Optional[str] = None,
         mission: Optional[MissionConfig] = None,
         safety_mode: Optional[str] = None,
+        run_config: Optional[RunConfig] = None,
+        domain: Optional[DomainConfig] = None,
+        faults: Optional[FaultConfig] = None,
     ) -> None:
         super().__init__()
         self.render_mode = render_mode
-        self.mission = mission
-        self.max_steps = int(max_steps or (mission.max_steps if mission else ENV_CONFIG.max_steps))
-        self.safety_mode = safety_mode or (mission.safety_mode if mission else "v1")
+        self.run_config = run_config
+        self.mission = run_config.mission if run_config else mission
+        self.max_steps = int(max_steps or (run_config.max_steps if run_config else (mission.max_steps if mission else ENV_CONFIG.max_steps)))
+        self.safety_mode = safety_mode or (run_config.safety_mode if run_config else (mission.safety_mode if mission else "v1"))
+        self.env_config = run_config.environment if run_config else ENV_CONFIG
+        self.physics_config = run_config.physics if run_config else PHYSICS_CONFIG
+        self.actuator_config = run_config.actuator if run_config else ActuatorConfig()
+        self.safety_config = run_config.safety if run_config else SAFETY_CONFIG
+        self.reset_config = run_config.reset if run_config else None
+        self.domain_config = run_config.domain if run_config and run_config.domain else domain
+        self.fault_config = run_config.faults if run_config and run_config.faults else faults
         if self.safety_mode not in {"off", "v1", "v2"}:
             raise ValueError("safety_mode must be one of: off, v1, v2")
 
@@ -79,18 +89,50 @@ class SpacecraftEnv(gym.Env):
         # --- mutable episode state ---
         self.rel_pos: np.ndarray = np.zeros(3, dtype=np.float64)
         self.rel_vel: np.ndarray = np.zeros(3, dtype=np.float64)
-        self.fuel: float = float(mission.initial_fuel if mission else 1.0)
+        self.fuel: float = float(self.mission.initial_fuel if self.mission else 1.0)
         self.step_count: int = 0
+        # --- per-episode domain draws (identity unless configured) ---
+        self.episode_mass_kg: float = 1.0
+        self.episode_effectiveness: np.ndarray = np.ones(3, dtype=np.float64)
+        self._last_obs: Optional[np.ndarray] = None
 
     # ------------------------------------------------------------------ helpers
+    def _draw_domain(self) -> None:
+        """Draw per-episode mass/effectiveness from the seeded RNG (identity by default)."""
+        domain = self.domain_config
+        if domain is None or domain.is_identity:
+            self.episode_mass_kg = 1.0
+            self.episode_effectiveness = np.ones(3, dtype=np.float64)
+            return
+        self.episode_mass_kg = float(
+            self.np_random.uniform(domain.mass_low_kg, domain.mass_high_kg)
+        )
+        tol = float(domain.effectiveness_tol)
+        self.episode_effectiveness = self.np_random.uniform(1.0 - tol, 1.0 + tol, size=3).astype(
+            np.float64
+        )
+
     def _get_obs(self) -> np.ndarray:
-        """Build the normalized 10-D observation vector."""
-        pos_norm = self.rel_pos / ENV_CONFIG.pos_norm_scale
-        vel_norm = self.rel_vel / ENV_CONFIG.vel_norm_scale
+        """Build the normalized 10-D observation vector.
+
+        With domain randomization, camera/IMU noise perturbs the observed
+        position/velocity (and the bearing derived from them). The true state
+        in rel_pos/rel_vel — used for rewards and docking judgment — is exact.
+        """
+        pos = np.asarray(self.rel_pos, dtype=np.float64)
+        vel = np.asarray(self.rel_vel, dtype=np.float64)
+        domain = self.domain_config
+        if domain is not None and (
+            domain.obs_pos_noise_std_m > 0.0 or domain.obs_vel_noise_std_mps > 0.0
+        ):
+            pos = pos + self.np_random.normal(0.0, domain.obs_pos_noise_std_m, size=3)
+            vel = vel + self.np_random.normal(0.0, domain.obs_vel_noise_std_mps, size=3)
+        pos_norm = pos / self.env_config.pos_norm_scale
+        vel_norm = vel / self.env_config.vel_norm_scale
         fuel_frac = float(self.fuel)
         time_frac = float(self.step_count) / float(self.max_steps)
 
-        planar = np.asarray(self.rel_pos[0:2], dtype=np.float64)
+        planar = np.asarray(pos[0:2], dtype=np.float64)
         planar_norm = float(np.linalg.norm(planar))
         if planar_norm > _EPS:
             bearing = -planar / planar_norm
@@ -104,8 +146,13 @@ class SpacecraftEnv(gym.Env):
                 np.asarray([fuel_frac, time_frac], dtype=np.float64),
                 np.asarray(bearing, dtype=np.float64),
             ]
-        )
-        return obs.astype(np.float32)
+        ).astype(np.float32)
+        faults = self.fault_config
+        if faults is not None and faults.sensor_freeze_prob > 0.0 and self._last_obs is not None:
+            if float(self.np_random.uniform()) < faults.sensor_freeze_prob:
+                return self._last_obs
+        self._last_obs = obs
+        return obs
 
     def _info(
         self,
@@ -125,6 +172,7 @@ class SpacecraftEnv(gym.Env):
             "safety_reason": safety_reason,
             "fuel": float(self.fuel),
             "step_count": int(self.step_count),
+            "reward_breakdown": {},
         }
 
     # -------------------------------------------------------------------- gym API
@@ -138,22 +186,39 @@ class SpacecraftEnv(gym.Env):
         super().reset(seed=seed)
 
         if self.mission is None:
-            pos_bound = ENV_CONFIG.initial_pos_bound
-            vel_bound = ENV_CONFIG.initial_vel_bound
-            self.rel_pos = self.np_random.uniform(-pos_bound, pos_bound, size=3).astype(np.float64)
-            self.rel_vel = self.np_random.uniform(-vel_bound, vel_bound, size=3).astype(np.float64)
-            self.fuel = 1.0
+            reset = self.reset_config
+            distribution = reset.distribution if reset else "uniform"
+            pos_bound = reset.position_bound if reset else self.env_config.initial_pos_bound
+            vel_bound = reset.velocity_bound if reset else self.env_config.initial_vel_bound
+            if distribution == "curriculum":
+                pos_bounds = reset.curriculum_position_bounds
+                vel_bounds = reset.curriculum_velocity_bounds
+                stage = min(reset.curriculum_stage, len(pos_bounds) - 1, len(vel_bounds) - 1)
+                pos_bound, vel_bound = pos_bounds[stage], vel_bounds[stage]
+            if distribution == "radial":
+                self.rel_pos = np.array([self.np_random.uniform(pos_bound * 0.5, pos_bound), 0.0, 0.0], dtype=np.float64)
+                self.rel_vel = self.np_random.uniform(-vel_bound, vel_bound, size=3).astype(np.float64)
+            else:
+                self.rel_pos = self.np_random.uniform(-pos_bound, pos_bound, size=3).astype(np.float64)
+                self.rel_vel = self.np_random.uniform(-vel_bound, vel_bound, size=3).astype(np.float64)
+            domain = self.domain_config
+            if domain is not None and (domain.fuel_low, domain.fuel_high) != (1.0, 1.0):
+                self.fuel = float(self.np_random.uniform(domain.fuel_low, domain.fuel_high))
+            else:
+                self.fuel = 1.0
         else:
             self.rel_pos = np.asarray(self.mission.relative_pos, dtype=np.float64)
             self.rel_vel = np.asarray(self.mission.relative_vel, dtype=np.float64)
             self.fuel = float(self.mission.initial_fuel)
         self.step_count = 0
+        self._last_obs = None
+        self._draw_domain()
 
         dist = float(np.linalg.norm(self.rel_pos))
         speed = float(np.linalg.norm(self.rel_vel))
         is_success = bool(
-            dist < ENV_CONFIG.docking_success_dist
-            and speed < SAFETY_CONFIG.max_docking_speed
+            dist < self.env_config.docking_success_dist
+            and speed < self.safety_config.max_docking_speed
         )
         info = self._info(
             dist=dist,
@@ -181,7 +246,7 @@ class SpacecraftEnv(gym.Env):
             override = None
             safety_reason = "Safety interlock disabled."
         elif self.safety_mode == "v2":
-            decision = apply_safety_filter(cmd, self.rel_pos, self.rel_vel, self.fuel, goal_type)
+            decision = apply_safety_filter(cmd, self.rel_pos, self.rel_vel, self.fuel, goal_type, self.safety_config)
             applied = np.asarray(decision["applied"], dtype=np.float64)
             override = decision["override"]
             safety_reason = str(decision["reason"])
@@ -193,46 +258,86 @@ class SpacecraftEnv(gym.Env):
                 current_speed=speed_prev,
                 commanded_action=cmd,
                 rel_vel=np.asarray(self.rel_vel, dtype=np.float64),
+                safety_config=self.safety_config,
             )
             status = str(verdict["status"])
             applied = cmd if status == "accepted" else np.zeros(3, dtype=np.float64)
             override = None if status == "accepted" else status
             safety_reason = str(verdict["reason"])
 
+        # --- faults (post-interlock, pre-physics): stuck -> bias -> dropout ---
+        faults = self.fault_config
+        fault_active: Optional[str] = None
+        disturbed = np.asarray(applied, dtype=np.float64)
+        if faults is not None and not faults.is_identity:
+            if faults.stuck_axis is not None:
+                disturbed[faults.stuck_axis] = faults.stuck_value
+                fault_active = "stuck_thruster"
+            disturbed = disturbed + np.asarray(faults.bias, dtype=np.float64)
+            if faults.dropout_prob > 0.0 and float(self.np_random.uniform()) < faults.dropout_prob:
+                disturbed = np.zeros(3, dtype=np.float64)
+                fault_active = "command_dropout"
+
+        # --- domain: mass/inertia scaling + thruster noise, then clip ---
+        domain = self.domain_config
+        mass_scale = 1.0
+        if domain is not None and not domain.is_identity:
+            mass_scale = float(domain.mass_nominal_kg / self.episode_mass_kg)
+            disturbed = disturbed * self.episode_effectiveness
+            if domain.thrust_noise_std > 0.0:
+                disturbed = disturbed + self.np_random.normal(0.0, domain.thrust_noise_std, size=3)
+        accel_cmd = np.clip(
+            disturbed * mass_scale * self.actuator_config.max_cmd_accel,
+            -self.actuator_config.max_cmd_accel,
+            self.actuator_config.max_cmd_accel,
+        )
+
         # --- physics: exact CW state transition matrix ---
         next_pos, next_vel = cw_step(
             self.rel_pos,
             self.rel_vel,
-            applied * MAX_CMD_ACCEL,
-            dt=self.mission.dt if self.mission else PHYSICS_CONFIG.dt,
-            n=self.mission.mean_motion if self.mission else PHYSICS_CONFIG.n,
+            accel_cmd,
+            dt=self.physics_config.dt,
+            n=self.physics_config.n,
         )
         self.rel_pos = np.asarray(next_pos, dtype=np.float64)
         self.rel_vel = np.asarray(next_vel, dtype=np.float64)
 
         thrust_mag = float(np.sum(np.abs(applied)))
-        self.fuel = max(0.0, float(self.fuel) - ENV_CONFIG.fuel_rate_scale * thrust_mag)
+        fuel_debit = self.actuator_config.fuel_rate_scale * thrust_mag
+        if faults is not None and faults.fuel_leak_rate > 0.0:
+            fuel_debit += faults.fuel_leak_rate
+            fault_active = fault_active or "fuel_leak"
+        self.fuel = max(0.0, float(self.fuel) - fuel_debit)
         self.step_count += 1
 
         dist = float(np.linalg.norm(self.rel_pos))
         speed = float(np.linalg.norm(self.rel_vel))
 
-        reward = (
-            ENV_CONFIG.progress_reward_weight * (dist_prev - dist)
-            - ENV_CONFIG.velocity_penalty_weight * speed
-            - ENV_CONFIG.action_penalty_weight * thrust_mag
-        )
+        fuel_used = max(0.0, float(self.actuator_config.fuel_rate_scale * thrust_mag))
+        progress = self.env_config.progress_reward_weight * (dist_prev - dist)
+        divergence = -self.env_config.divergence_penalty_weight * max(0.0, dist - dist_prev)
+        velocity = -self.env_config.velocity_penalty_weight * speed
+        fuel_penalty = -self.env_config.fuel_penalty_weight * fuel_used
+        effort = -self.env_config.action_penalty_weight * thrust_mag
+        risk = 0.0
+        if dist < self.safety_config.safe_approach_dist:
+            risk = max(0.0, (speed - self.safety_config.max_safe_closing_speed) / self.safety_config.max_safe_closing_speed)
+        collision_risk = -self.env_config.collision_risk_penalty_weight * risk
+        reward = progress + divergence + velocity + fuel_penalty + effort + collision_risk
 
         is_success = bool(
-            dist < ENV_CONFIG.docking_success_dist
-            and speed < SAFETY_CONFIG.max_docking_speed
+            dist < self.env_config.docking_success_dist
+            and speed < self.safety_config.max_docking_speed
         )
         terminated = False
         truncated = False
+        docking = 0.0
         if is_success:
-            reward += ENV_CONFIG.docking_bonus
+            docking = self.env_config.docking_bonus
+            reward += docking
             terminated = True
-        elif self.fuel <= 0.0 or self.step_count >= self.max_steps:
+        elif self.fuel <= 0.0 or self.step_count >= self.max_steps or dist > self.env_config.work_volume_bound:
             truncated = True
 
         info = self._info(
@@ -243,4 +348,18 @@ class SpacecraftEnv(gym.Env):
             applied_action=applied,
             safety_reason=safety_reason,
         )
+        info["collision_risk"] = float(risk)
+        info["fuel_used"] = float(fuel_used)
+        info["domain"] = {
+            "mass_kg": float(self.episode_mass_kg),
+            "effectiveness": [float(v) for v in self.episode_effectiveness],
+        }
+        info["fault"] = fault_active
+        info["executed_action"] = np.asarray(accel_cmd, dtype=np.float64)
+        info["reward_breakdown"] = {
+            "progress": float(progress), "divergence": float(divergence),
+            "velocity": float(velocity), "fuel": float(fuel_penalty),
+            "action_effort": float(effort), "collision_risk": float(collision_risk),
+            "docking_success": float(docking),
+        }
         return self._get_obs(), float(reward), terminated, truncated, info

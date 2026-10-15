@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from spaceforge_mvp.config import ENV_CONFIG, PHYSICS_CONFIG, SAFETY_CONFIG, MissionConfig
+from spaceforge_mvp.config import ENV_CONFIG, PHYSICS_CONFIG, SAFETY_CONFIG, MissionConfig, RunConfig
 from spaceforge_mvp.core.cw_dynamics import cw_step
 from spaceforge_mvp.env.spacecraft_env import SpacecraftEnv
 
@@ -50,6 +50,8 @@ def replay_continuous_min(
     frames: List[Dict[str, Any]],
     sub_dt: float = 0.01,
     interval_dt: float = PHYSICS_CONFIG.dt,
+    mean_motion: float = PHYSICS_CONFIG.n,
+    max_cmd_accel: float = 1.0,
 ) -> Tuple[float, float]:
     """True minimum range, replaying the recorded commands at sub-sample resolution.
 
@@ -68,7 +70,7 @@ def replay_continuous_min(
     for f in frames[1:]:
         applied = np.asarray(f["applied"], dtype=np.float64)
         for _ in range(n_sub):
-            pos, vel = cw_step(pos, vel, applied, dt=sub_dt)
+            pos, vel = cw_step(pos, vel, applied * max_cmd_accel, dt=sub_dt, n=mean_motion)
             d = float(np.linalg.norm(pos))
             if d < best_dist:
                 best_dist, best_speed = d, float(np.linalg.norm(vel))
@@ -85,6 +87,7 @@ def record_episode(
     annotate_continuous: bool = False,
     goal_type: str = "APPROACH",
     mission: Optional[MissionConfig] = None,
+    run_config: Optional[RunConfig] = None,
 ) -> Dict[str, Any]:
     """Roll out one episode and return a full telemetry trace.
 
@@ -101,7 +104,10 @@ def record_episode(
     annotate_continuous : bool
         Also compute the continuous-time closest approach (fine sub-stepping).
     """
-    if mission is None:
+    if run_config is not None:
+        mission = run_config.mission
+        env = SpacecraftEnv(run_config=run_config, safety_mode=safety)
+    elif mission is None:
         if initial is None:
             env = SpacecraftEnv(max_steps=max_steps, safety_mode=safety)
         else:
@@ -118,9 +124,16 @@ def record_episode(
                 goal_type=goal_type,
             )
             env = SpacecraftEnv(mission=mission)
-    else:
+    elif run_config is None:
         env = SpacecraftEnv(mission=mission, safety_mode=safety)
     env.reset(seed=seed)
+    # Resync wrapped-RL obs tracking (fuel/time) at episode start when available.
+    reset_tracking = getattr(controller, "reset_tracking", None)
+    if callable(reset_tracking):
+        try:
+            reset_tracking(float(env.fuel))
+        except TypeError:
+            reset_tracking()
 
     start_dist = float(np.linalg.norm(env.rel_pos))
     frames: List[Dict[str, Any]] = []
@@ -150,9 +163,8 @@ def record_episode(
         step += 1
 
         dist = float(np.linalg.norm(env.rel_pos))
-        speed = float(np.linalg.norm(env.rel_vel))
         min_dist = min(min_dist, dist)
-        step_dt = mission.dt if mission else PHYSICS_CONFIG.dt
+        step_dt = run_config.physics.dt if run_config else (mission.dt if mission else PHYSICS_CONFIG.dt)
         snap(step * step_dt, cmd, applied, override)
 
         if terminated:
@@ -172,7 +184,7 @@ def record_episode(
         "end_speed": round(float(np.linalg.norm(env.rel_vel)), 4),
         "success": terminal_reason == "docked",
         "steps": step,
-        "duration": round(step * (mission.dt if mission else PHYSICS_CONFIG.dt), 2),
+        "duration": round(step * (run_config.physics.dt if run_config else (mission.dt if mission else PHYSICS_CONFIG.dt)), 2),
         "fuel_used": round((mission.initial_fuel if mission else 1.0) - float(env.fuel), 5),
         "dv": round(dv, 4),
         "overrides": overrides,
@@ -181,7 +193,10 @@ def record_episode(
 
     if annotate_continuous:
         best_d, best_v = replay_continuous_min(
-            frames, interval_dt=mission.dt if mission else PHYSICS_CONFIG.dt
+            frames,
+            interval_dt=run_config.physics.dt if run_config else (mission.dt if mission else PHYSICS_CONFIG.dt),
+            mean_motion=run_config.physics.n if run_config else (mission.mean_motion if mission else PHYSICS_CONFIG.n),
+            max_cmd_accel=run_config.actuator.max_cmd_accel if run_config else 1.0
         )
         summary["continuous_min_dist"] = round(best_d, 4)
         summary["continuous_min_speed"] = round(best_v, 4)
@@ -193,7 +208,13 @@ def record_episode(
 
 
 def rl_controller(checkpoint: str, deterministic: bool = True) -> Controller:
-    """Wrap an SB3 checkpoint as a plain controller callable."""
+    """Wrap an SB3 checkpoint as a plain controller callable.
+
+    The dummy env only builds the observation vector; time/fuel fractions are
+    tracked locally so the policy does not see a frozen step_count=0 and
+    fuel=1.0 for the whole episode (previous fidelity bug). The controller
+    signature stays (pos, vel) -> action for backward compatibility.
+    """
     from stable_baselines3 import PPO
 
     from spaceforge_mvp.env.spacecraft_env import SpacecraftEnv as _Env
@@ -201,15 +222,30 @@ def rl_controller(checkpoint: str, deterministic: bool = True) -> Controller:
     model = PPO.load(checkpoint)
     env = _Env()
     env.reset(seed=0)
+    state = {"steps": 0, "fuel": 1.0, "last_applied_norm": 0.0}
 
     def act(rel_pos: np.ndarray, rel_vel: np.ndarray) -> np.ndarray:
         env.rel_pos = np.asarray(rel_pos, dtype=np.float64)
         env.rel_vel = np.asarray(rel_vel, dtype=np.float64)
-        env.step_count = 0
+        # Advance local time/fuel estimates using the previous step's spend so
+        # obs[6:8] evolve instead of staying frozen. Clamped, never negative.
+        env.step_count = int(state["steps"])
+        env.fuel = float(max(0.0, min(1.0, state["fuel"])))
         obs = env._get_obs()
         action, _ = model.predict(obs, deterministic=deterministic)
-        return np.asarray(action, dtype=np.float64).reshape(3)
+        action = np.asarray(action, dtype=np.float64).reshape(3)
+        # Mirror env fuel dynamics: fuel -= fuel_rate * sum|applied|.
+        spend = float(np.sum(np.abs(np.clip(action, -1.0, 1.0)))) * env.actuator_config.fuel_rate_scale
+        state["fuel"] = max(0.0, state["fuel"] - spend)
+        state["steps"] += 1
+        return action
 
+    # Exposed for tests/callers that want to resync (e.g. new episode).
+    def reset_tracking(fuel: float = 1.0) -> None:
+        state["steps"] = 0
+        state["fuel"] = float(fuel)
+
+    act.reset_tracking = reset_tracking  # type: ignore[attr-defined]
     return act
 
 

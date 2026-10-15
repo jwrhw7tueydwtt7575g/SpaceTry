@@ -66,7 +66,7 @@ prefix; both work.
 PYTHONPATH=. .venv/bin/python -m pytest -q
 ```
 
-**Expected:** `26 passed` in about 4 seconds.
+**Expected:** `64 passed` in about 12 seconds.
 
 The suite covers the CW physics, the safety interlock, the environment, training and evaluation
 smoke tests, and the runtime-assurance filter. If you see `ModuleNotFoundError: spaceforge_mvp`, you
@@ -232,6 +232,30 @@ print(f'{ok}/200 docked, mean {steps/200:.1f} steps, {fires} interlock fires')"
 ```
 
 About 20 seconds.
+
+### The Phase 6 validation matrix — expect all verdicts true
+
+```bash
+PYTHONPATH=. .venv/bin/python -m spaceforge_mvp.eval.validation_matrix \
+    --episodes 120 --seed 0 --output /tmp/phase6/matrix_report.json
+```
+
+```
+[   nominal] success 100.00%  fuel 0.0014 (max 0.0017)  dv 1.417  overrides 0.000  violations 0
+[randomized] success 100.00%  fuel 0.0046 (max 0.0061)  dv 4.593  overrides 0.000  violations 0
+[    faults] success 100.00%  fuel 0.0294 (max 0.0462)  dv 3.708  overrides 0.000  violations 0
+[pose]      measured: mean 7.5e-08 m, max 5.8e-07 m over 120 trials
+[llm]       measured: valid 1.0  contained 1.0
+[curriculum] measured: advance-in-50 True  rollback True
+[sim2sim]   measured: max div 1.5e-08 m, agreement 1.0
+[verdicts]  {"success_above_threshold": true, "fuel_within_budget": true, "no_invariant_violations": true}
+```
+
+120 episodes per domain level (360 total), 120 PnP trials, 20/25 LLM probes,
+20 paired sim-to-sim rollouts. About 2 minutes. Full numbers and the explicit
+unverified list live in `VALIDATION_RESULTS.md`. Sibling packages must be on
+`PYTHONPATH` for the pose/LLM/curriculum/sim2sim probes (see the CI `python`
+job); without them those probes report `unavailable` instead of guessing.
 
 ### The three protection levels, side by side
 

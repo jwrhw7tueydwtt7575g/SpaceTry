@@ -25,7 +25,8 @@ claimed and what the repository did is itself one of the findings.
 | Have numbers you can quote | §7 |
 | Actually run it | §8 |
 | Know what is still unfinished | §9 |
-| Look up a term | §10 |
+| See Phase 6 hardening + measured validation numbers | §10 |
+| Look up a term | §11 |
 
 Two companion documents: **CRITIQUE.md** is the engineering critique with the evidence behind every
 finding in §5. **PRESENTATION.md** is the script for showing this to people, with what to say over
@@ -56,10 +57,10 @@ The project contains three ways to fly: a **reinforcement-learned policy** (the 
 ships with the repo), a **classical guidance law** (Glideslope baseline), and an **adversarial hot-approach**
 stress test. And it contains a configurable **safety interlock** (`off`, `v1` zeroing veto, or `v2` active braking).
 
-What the repository is *not*: it is not a robotics stack. There is no ROS 2, no Gazebo, no
-perception, no camera, no 3D view. The README describes a five-layer production architecture with
-ROS nodes, YOLOv8 perception and a LangChain planner, and labels that diagram "Conceptual Layer" —
-none of it exists in this repo. What exists is ~3,700 lines of numpy physics, a Gymnasium environment, a
+What the repository is *not*: it is not a validated robotics stack. `ros2_ws/` contains a
+Phase-1 ROS 2 / Gazebo / perception / planner integration (7 contract-first packages),
+but it needs ROS 2 Humble + Gazebo Harmonic and is unvalidated on a plain Python host.
+What is validated is ~4,300 lines of numpy physics, a Gymnasium environment, a
 rule engine, a CLI simulation orchestrator, and a recording and rendering pipeline.
 
 ---
@@ -133,28 +134,35 @@ One `step(action)` does:
 3. Debit fuel by the **applied** (post-interlock) magnitude: `0.001 × Σ|applied|` per step off the tank.
 4. Compute the reward, and decide whether the episode ended.
 
-**Reward** (from `config.py`):
+**Reward** (from `config.py` + `env/spacecraft_env.py` — full breakdown in `info["reward_breakdown"]`):
 
 | Term | Value | Notes |
 |---|---|---|
 | Radial progress | `+5.0 × (d_prev − d_now)` | pays for closing distance |
+| Divergence penalty | `−1.0 × max(0, d_now − d_prev)` | flying away costs extra (added post-critique) |
 | Speed penalty | `−0.5 × speed` | every step |
 | Effort penalty | `−0.01 × Σ\|a_i\|` | sum of absolute *applied* accelerations |
+| Fuel penalty | `−0.1 × fuel_used_this_step` | ties spend to tank |
+| Collision-risk penalty | `−5.0 × max(0, (speed−0.2)/0.2)` inside 5 m | dense slow-down signal in bubble |
 | Docking jackpot | `+100` | on a successful capture |
 
 **Termination.** Success (distance < 0.5 m AND speed < 0.1 m/s) ends the episode with +100. Fuel
 below zero truncates without success. Running out of the step budget truncates without success.
+Leaving the 100 m work volume (`work_volume_bound`) also truncates — bounds the fly-away failure.
+Note the 1 Hz sampler can step over the 0.5 m bubble at m/s speeds; use
+`viz/record.py:replay_continuous_min` (10 ms replay) for ground-truth closest approach.
 
 **The safety interlocks:**
-- **v1 (Shipped zeroing rule engine)**: Fuel floor (<5% -> emergency hold); inside 5m if speed > 0.2 m/s, zero the command.
-- **v2 (Runtime Assurance Active Braking)**: Inside 5m if speed > 0.2 m/s, replaces command with maximum braking opposing velocity vector ($u \cdot v \le 0$).
+- **v1**: Fuel floor (<5% -> emergency hold); inside 5 m if speed > 0.2 m/s, braking thrust (`u·v ≤ 0`) is accepted, accelerating thrust is zeroed. Legacy scope is `APPROACH`-only; set `SafetyConfig(enforce_proximity_for_all_goals=True)` for geometry-only enforcement so no goal label can bypass it.
+- **v2 (Runtime Assurance Active Braking)**: Same veto rules; on veto substitutes maximum braking opposing velocity vector ($u \cdot v \le 0$) instead of zeroing.
 - **off**: Direct feedthrough for adversarial/counterfactual benchmarking.
+- Known limit: at default `fuel_rate_scale=0.001` the 5% floor is unreachable in 300 steps (max burn 0.9); raise the rate or lengthen the budget if the floor must be reachable, or configure a custom `ActuatorConfig`.
 
 ---
 
 ## 4. The repository, file by file
 
-`spaceforge_mvp/` totals **~3,700 Python lines**:
+`spaceforge_mvp/` totals **~4,300 Python lines**:
 
 | Path | Lines | Origin | What it does |
 |---|---|---|---|
@@ -174,7 +182,7 @@ below zero truncates without success. Running out of the step budget truncates w
 | `viz/dashboard.py` | 497 | **added** | Emits self-contained interactive HTML replay |
 | `viz/scenarios.py` | 89 | **added** | Defines and records the five benchmark scenarios |
 | `viz/preview.py` | 59 | **added** | Renders single frames for inspection |
-| `tests/` (9 files) | 658 | mixed | 28 tests total (20 shipped, 6 RTA, 2 CLI mission tests in `test_mission_cli.py`) |
+| `tests/` (14 files) | ~1100 | mixed | 64 tests total (see `pytest --collect-only`) |
 
 ### Quick Directory & Folder Summary
 
@@ -187,7 +195,7 @@ below zero truncates without success. Running out of the step budget truncates w
 | 📁 `training/` | [`train.py`](file:///home/vivek/Desktop/SpaceForge/spaceforgemvp/spaceforge_mvp/training/train.py) | **RL Training:** Stable-Baselines3 PPO training loop with checkpointing. |
 | 📁 `eval/` | [`run_eval.py`](file:///home/vivek/Desktop/SpaceForge/spaceforgemvp/spaceforge_mvp/eval/run_eval.py), [`plot_trajectory.py`](file:///home/vivek/Desktop/SpaceForge/spaceforgemvp/spaceforge_mvp/eval/plot_trajectory.py) | **Evaluation:** Runs multi-episode benchmark tests and generates 2D trajectory plots (`.png`). |
 | 📁 `viz/` | `record.py`, `dashboard.py`, `render.py`, `make_videos.py` | **Visuals & Telemetry:** Records JSON traces, builds interactive HTML dashboard, and renders MP4s. |
-| 📁 `tests/` | 9 test files | **Automated Tests:** 28 unit and integration tests (`pytest`). |
+| 📁 `tests/` | 12 test files | **Automated Tests:** 40 unit and integration tests (`pytest spaceforge_mvp/tests`). |
 | 📁 `checkpoints/` | `ppo_spacecraft_final.zip` | **Model Files:** Saved neural network weights from training runs. |
 | 📁 `runs/` | `mission.json`, `telemetry.json`, `metrics.json` | **Outputs:** Output logs from CLI simulation runs. |
 | 📄 `simulate.py` | Main CLI Simulator | Single command to simulate missions with custom positions, velocities, and fuel. |
@@ -247,8 +255,8 @@ Substitutes maximum opposing braking when speed gate is exceeded.
 - `viz/render.py` & `viz/make_videos.py`: 1080p MP4 renderer for 3 acts and stitched presentation film.
 - `viz/dashboard.py`: Standalone HTML replay widget (`dashboard.html`).
 
-### 6.6 Full Test Suite (28 Tests)
-28 tests passing (`pytest -q`): CW dynamics, environment mechanics, safety interlocks, RTA active braking, integration smoke, and CLI mission parsing.
+### 6.6 Full Test Suite (40 Tests)
+64 tests passing (`pytest spaceforge_mvp/tests -q`): CW dynamics, environment mechanics, safety interlocks, RTA active braking, domain randomization, validation matrix smoke, integration smoke, and CLI mission parsing.
 
 ---
 
@@ -280,8 +288,8 @@ From the repository root:
 # 0. Activate virtual environment
 source .venv/bin/activate
 
-# 1. Run full test suite (28 tests)
-python3 -m pytest -q
+# 1. Run full test suite (64 tests)
+python3 -m pytest spaceforge_mvp/tests -q
 
 # 2. Run CLI Mission Simulation
 python3 -m spaceforge_mvp.simulate \
@@ -319,12 +327,22 @@ python3 -m spaceforge_mvp.training.train --total_timesteps 500  # smoke test
 
 1. **Reward redesign & retraining**: Bound episode exploration, add boundary escape penalty, align effort penalty with fuel.
 2. **Independent physics test**: Add RK4 numerical integration test against analytical CW STM matrix.
-3. **Automated CI**: Add GitHub Actions workflow.
-4. **Future robotics layers**: Gazebo/ROS 2 integration and YOLOv8 perception remain future milestones.
+3. **Future robotics layers**: Gazebo/ROS 2 closed-loop validation (workflow exists, needs a ROS+Gazebo runner).
+4. **PPO retraining under domain randomization**: shipped checkpoint is 0% even nominally.
 
 ---
 
-## 10. Glossary
+## 10. Phase 6 hardening (domain randomization + validation matrix + CI)
+
+- **Domain randomization** (`config.py: DomainConfig`, `env/spacecraft_env.py`): per-episode mass 0.8–1.2 kg scale, ±10% actuator effectiveness, thrust/observation noise, fuel spread. **Fault injection** (`FaultConfig`): stuck thruster, bias, dropout, sensor freeze, fuel leak. Both identity-by-default: 45/45 pre-existing tests pass unchanged, and identity-domain trajectories match bit-for-bit.
+- **Communication latency** (`rl_env MockTransport`): whole-control-step delay line, `ceil(latency/dt)`; 1–10 ms studies need backend dt ≤ 0.01 s (at dt=1 s any nonzero latency conservatively costs one step). Seeded noise replays identically.
+- **Validation matrix** (`eval/validation_matrix.py`, 120 episodes/level, seed 0): nominal/randomized/faults all **100% docking**, fuel 0.0014/0.0046/0.0294, 0 invariant violations; pose error mean 7.5e-08 m; LLM valid 1.00/contained 1.00; curriculum advance+rollback true; sim-to-sim max divergence 1.5e-08 m with 20/20 success agreement. Full table in `VALIDATION_RESULTS.md`.
+- **CI**: `python` (MVP + all ROS offline suites + matrix smoke), `frontend` (node logic + jsdom browser smoke), `lint` (ruff F/E9), `ros` (colcon + C++ Gazebo plugin + live tests — needs a ROS+Gazebo runner, unverified here).
+- **Known limitations**: shipped PPO still 0%; fuel-floor rule unreachable at defaults; ROS/Gazebo/hardware checks unverified; latency quantization is conservative at dt=1 s; PnP probe is noise-free (noise sensitivity via the randomized level instead).
+
+---
+
+## 11. Glossary
 
 | Term | Meaning |
 |---|---|

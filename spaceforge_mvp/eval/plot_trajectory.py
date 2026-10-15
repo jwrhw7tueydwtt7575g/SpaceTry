@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from stable_baselines3 import PPO
 
-from spaceforge_mvp.config import ENV_CONFIG
+from spaceforge_mvp.config import ENV_CONFIG, RunConfig
 from spaceforge_mvp.env.spacecraft_env import SpacecraftEnv
 
 # Set matplotlib non-interactive backend for headless execution
@@ -20,6 +20,7 @@ def generate_trajectory_data(
     checkpoint_path: str,
     seed: int = 42,
     max_steps: int = ENV_CONFIG.max_steps,
+    run_config: RunConfig | None = None,
 ) -> Tuple[List[np.ndarray], bool, float, float]:
     """
     Run single episode evaluation recording relative 2D positions (X-radial vs Y-in-track).
@@ -30,7 +31,7 @@ def generate_trajectory_data(
         (trajectory_positions, is_success, final_dist, final_fuel)
     """
     model = PPO.load(checkpoint_path, seed=seed)
-    env = SpacecraftEnv(max_steps=max_steps)
+    env = SpacecraftEnv(run_config=run_config) if run_config else SpacecraftEnv(max_steps=max_steps)
 
     obs, info = env.reset(seed=seed)
     trajectory: List[np.ndarray] = [env.rel_pos[0:2].copy()]
@@ -54,11 +55,13 @@ def plot_trajectory(
     checkpoint_path: str,
     output_path: str = "eval/trajectory.png",
     seed: int = 42,
+    run_config: RunConfig | None = None,
 ) -> None:
     """Generate 2D matplotlib relative trajectory plot and save to disk."""
     trajectory, is_success, final_dist, final_fuel = generate_trajectory_data(
         checkpoint_path=checkpoint_path,
         seed=seed,
+        run_config=run_config,
     )
 
     traj_arr = np.array(trajectory)  # shape (N, 2)
@@ -70,12 +73,12 @@ def plot_trajectory(
     # Plot 0.5m success radius target circle
     target_circle = plt.Circle(
         (0.0, 0.0),
-        ENV_CONFIG.docking_success_dist,
+        run_config.environment.docking_success_dist if run_config else ENV_CONFIG.docking_success_dist,
         color="green",
         fill=False,
         linestyle="--",
         linewidth=2,
-        label=f"Success Radius ({ENV_CONFIG.docking_success_dist}m)",
+        label=f"Success Radius ({run_config.environment.docking_success_dist if run_config else ENV_CONFIG.docking_success_dist}m)",
     )
     ax.add_patch(target_circle)
 

@@ -4,8 +4,34 @@ import argparse
 from typing import Any, Dict, Tuple
 from stable_baselines3 import PPO
 
-from spaceforge_mvp.config import ENV_CONFIG, SAFETY_CONFIG
+from spaceforge_mvp.control.glideslope import glideslope_action
+
+from spaceforge_mvp.config import RunConfig
 from spaceforge_mvp.env.spacecraft_env import SpacecraftEnv
+
+
+def _metrics_for_controller(controller, env, seeds):
+    success_count = 0
+    fuel_total = 0.0
+    steps_total = 0
+    overrides = 0
+    for episode_seed in seeds:
+        obs, _ = env.reset(seed=episode_seed)
+        initial_fuel = float(env.fuel)
+        done = False
+        steps = 0
+        last_info = {}
+        while not done:
+            action = controller(obs, env)
+            obs, _, terminated, truncated, last_info = env.step(action)
+            steps += 1
+            overrides += int(last_info.get("safety_override") is not None)
+            done = terminated or truncated
+        success_count += int(last_info.get("is_success", False))
+        fuel_total += max(0.0, initial_fuel - float(env.fuel))
+        steps_total += steps
+    count = max(1, len(seeds))
+    return {"success_rate": success_count / count, "avg_fuel_used": fuel_total / count, "avg_episode_length": steps_total / count, "safety_overrides_count": overrides}
 
 
 def run_eval(
@@ -13,6 +39,7 @@ def run_eval(
     num_episodes: int = 20,
     deterministic: bool = True,
     seed: int = 42,
+    run_config: RunConfig | None = None,
 ) -> Dict[str, Any]:
     """
     Evaluate a trained PPO policy checkpoint on SpacecraftEnv.
@@ -35,57 +62,39 @@ def run_eval(
         average episode length, and safety overrides count.
     """
     model = PPO.load(checkpoint_path, seed=seed)
-    env = SpacecraftEnv()
-
-    success_count = 0
-    total_fuel_consumed = 0.0
-    total_steps_elapsed = 0
-    total_safety_overrides = 0
-
-    for ep in range(num_episodes):
-        obs, info = env.reset(seed=seed + ep)
-        ep_steps = 0
-        done = False
-        last_info = info
-        initial_fuel = float(env.fuel)
-
-        while not done:
-            action, _ = model.predict(obs, deterministic=deterministic)
-            obs, reward, terminated, truncated, last_info = env.step(action)
-            ep_steps += 1
-
-            if last_info.get("safety_override") is not None:
-                total_safety_overrides += 1
-
-            done = terminated or truncated
-
-        # Episode succeeds if dist < 0.5m AND speed < 0.1m/s reached before timeout or fuel depletion
-        is_docked = (
-            last_info.get("distance", 999.0) < ENV_CONFIG.docking_success_dist
-            and last_info.get("speed", 999.0) < SAFETY_CONFIG.max_docking_speed
-        )
-        if is_docked or last_info.get("is_success", False):
-            success_count += 1
-
-        fuel_used = max(0.0, initial_fuel - float(env.fuel))
-        total_fuel_consumed += fuel_used
-        total_steps_elapsed += ep_steps
-
-    success_rate = float(success_count / num_episodes) if num_episodes > 0 else 0.0
-    avg_fuel_used = float(total_fuel_consumed / num_episodes) if num_episodes > 0 else 0.0
-    avg_episode_length = float(total_steps_elapsed / num_episodes) if num_episodes > 0 else 0.0
-
-    report = {
-        "success_rate": success_rate,
-        "avg_fuel_used": avg_fuel_used,
-        "average_fuel_used": avg_fuel_used,
-        "avg_episode_length": avg_episode_length,
-        "average_episode_length": avg_episode_length,
-        "safety_overrides_count": total_safety_overrides,
-        "safety_overrides": total_safety_overrides,
+    env = SpacecraftEnv(run_config=run_config) if run_config else SpacecraftEnv()
+    seeds = [(run_config.seed if run_config else seed) + ep for ep in range(num_episodes)]
+    policy_metrics = _metrics_for_controller(
+        lambda obs, _env: model.predict(obs, deterministic=deterministic)[0], env, seeds
+    )
+    baseline_env = SpacecraftEnv(run_config=run_config) if run_config else SpacecraftEnv()
+    baseline_metrics = _metrics_for_controller(
+        lambda _obs, baseline: glideslope_action(baseline.rel_pos, baseline.rel_vel), baseline_env, seeds
+    )
+    report = dict(policy_metrics)
+    report.update({
+        "average_fuel_used": report["avg_fuel_used"],
+        "average_episode_length": report["avg_episode_length"],
+        "safety_overrides": report["safety_overrides_count"],
         "episodes_evaluated": num_episodes,
-    }
-
+        "fixed_seeds": seeds,
+        "baseline": baseline_metrics,
+        "policy": policy_metrics,
+        "beats_baseline": bool(
+            policy_metrics["success_rate"] > baseline_metrics["success_rate"]
+            or (policy_metrics["success_rate"] == baseline_metrics["success_rate"]
+                and policy_metrics["avg_fuel_used"] < baseline_metrics["avg_fuel_used"])
+        ),
+        "acceptance": {
+            "min_success_rate": 0.85, "max_avg_fuel_used": 0.35,
+            "max_safety_overrides_per_episode": 1.0,
+        },
+    })
+    report["acceptance_passed"] = bool(
+        report["success_rate"] >= report["acceptance"]["min_success_rate"]
+        and report["avg_fuel_used"] <= report["acceptance"]["max_avg_fuel_used"]
+        and report["safety_overrides_count"] / max(1, num_episodes) <= report["acceptance"]["max_safety_overrides_per_episode"]
+    )
     print_report_table(report, checkpoint_path)
     return report
 
@@ -103,6 +112,9 @@ def print_report_table(report: Dict[str, Any], checkpoint_path: str) -> None:
     print(f"{'Average Fuel Used':<35} | {report['avg_fuel_used']:.4f}")
     print(f"{'Average Episode Length':<35} | {report['avg_episode_length']:.2f} steps")
     print(f"{'Safety Overrides Triggered':<35} | {report['safety_overrides_count']}")
+    print(f"{'Glideslope Success Rate':<35} | {report['baseline']['success_rate'] * 100:.2f}%")
+    print(f"{'Beats Glideslope Baseline':<35} | {report['beats_baseline']}")
+    print(f"{'Acceptance Passed':<35} | {report['acceptance_passed']}")
     print(divider + "\n")
 
 

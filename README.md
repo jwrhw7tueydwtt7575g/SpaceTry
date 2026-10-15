@@ -2,12 +2,13 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests](https://img.shields.io/badge/tests-28%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-64%20passed-brightgreen.svg)]()
 
 > **Status** — `MVP_SUMMARY.md` is the source of truth for what works and what does not.
 > The shipped PPO checkpoint scores **0 successes in 50 episodes**. The certified Glideslope
-> baseline docks **200/200 seeds**. The ROS 2 / Gazebo / YOLOv8 / LangChain production
-> layers described at the bottom of this file are a blueprint, not code in this repository.
+> baseline docks **200/200 seeds**. `ros2_ws/` holds an optional Phase-1 ROS 2 / Gazebo /
+> YOLOv8 / LangChain integration (7 packages, contract-first) that needs ROS 2 Humble +
+> Gazebo Harmonic to validate — it does not replace the pure-Python MVP below.
 
 **SpaceForge** is a simulation-first testbed for autonomous spacecraft rendezvous, proximity operations,
 and docking (RPO/Docking). It combines orbital relative dynamics, continuous reinforcement learning (PPO),
@@ -60,7 +61,7 @@ spaceforgemvp/
     │   ├── make_videos.py         ← Video compilation (3 acts + film)
     │   ├── dashboard.py           ← Standalone interactive HTML dashboard
     │   └── dashboard.html         ← Generated artifact (open in any browser)
-    └── tests/                     ← 28 automated tests (all passing)
+    └── tests/                     ← 40 automated tests (all passing)
         ├── test_cw_dynamics.py
         ├── test_spacecraft_env.py
         ├── test_mission_safety.py
@@ -83,7 +84,7 @@ spaceforgemvp/
 | 📁 `training/` | [`train.py`](file:///home/vivek/Desktop/SpaceForge/spaceforgemvp/spaceforge_mvp/training/train.py) | **AI Training:** Script to train PPO reinforcement learning models with Stable-Baselines3. |
 | 📁 `eval/` | [`run_eval.py`](file:///home/vivek/Desktop/SpaceForge/spaceforgemvp/spaceforge_mvp/eval/run_eval.py), [`plot_trajectory.py`](file:///home/vivek/Desktop/SpaceForge/spaceforgemvp/spaceforge_mvp/eval/plot_trajectory.py) | **Evaluation & 2D Plots:** Multi-episode metrics benchmark and trajectory PNG image generator. |
 | 📁 `viz/` | `record.py`, `dashboard.py`, `render.py`, `make_videos.py` | **Visuals & Telemetry:** Generates interactive HTML dashboard and broadcast MP4 videos. |
-| 📁 `tests/` | 9 test files | **Test Suite:** 28 automated unit & integration tests verifying math, env, and CLI. |
+| 📁 `tests/` | 12 test files | **Test Suite:** 40 automated unit & integration tests verifying math, env, and CLI. |
 | 📁 `checkpoints/` | `ppo_spacecraft_final.zip` | **Model Weights:** Saved PPO reinforcement learning policy checkpoints. |
 | 📁 `runs/` | `mission.json`, `telemetry.json`, `metrics.json` | **Output Results:** Saved telemetry logs and metrics from simulation runs. |
 | 📄 `simulate.py` | CLI Entrypoint | **Main Simulator:** Single command to run missions with custom positions, fuel, and controllers. |
@@ -153,6 +154,8 @@ flowchart TD
 | `viz/dashboard.py` | 497 | Self-contained HTML replay: play/pause, frame step, speed control, log-scale range chart. |
 | `viz/render.py` | 638 | Broadcast-grade MP4: HUD, thrust decomposition, range strip, title/result cards. |
 | `training/train.py` | 206 | SB3 PPO pipeline. Accepts optional `MissionConfig` for fixed-state training runs. |
+| `eval/validation_matrix.py` | — | Phase 6 matrix: 120+ episodes × domain levels, pose/LLM/curriculum/sim2sim probes, JSON report. |
+| `config.py: DomainConfig/FaultConfig` | — | Mass/inertia, thrust & camera/IMU noise, fuel spread, stuck/bias/dropout/freeze/leak faults. Identity by default. |
 
 ---
 
@@ -199,7 +202,7 @@ pip install -e .
 Verify installation:
 
 ```bash
-python3 -m pytest -q        # 28 passed
+python3 -m pytest spaceforge_mvp/tests -q        # 64 passed
 ```
 
 ---
@@ -290,7 +293,10 @@ Every `simulate` run writes three files to `--output-dir`:
 
 ## 7. Full Production Architecture (Blueprint)
 
-The production system is a 5-layer robotics stack. **None of these layers exist in this repository** — they are the stated build direction, not current code.
+The production system is a 5-layer robotics stack. The Phase-1 ROS 2 packages already
+exist under `ros2_ws/src/` (gazebo, rl_env, rl_trainer, mission_ctrl, perception,
+llm_planner, auto_trainer) but require ROS 2 Humble + Gazebo Harmonic to run; the
+pure-Python MVP below remains the validated reference oracle.
 
 ```mermaid
 flowchart TD
@@ -327,15 +333,15 @@ flowchart TD
 
 | Phase | What | Status |
 |---|---|---|
-| **Done** | Physics engine, Gym env, CLI simulator, glideslope baseline, v2 RTA, telemetry recorder, dashboard, videos, 28 tests | ✅ |
+| **Done** | Physics engine, Gym env, CLI simulator, glideslope baseline, v2 RTA, telemetry recorder, dashboard, videos, 64 tests | ✅ |
+| **Done** | CI: Python + frontend + lint workflows green; ROS/colcon/C++ workflow provided | ✅ |
+| **Done** | Independent RK4 reference test for CW STM correctness | ✅ |
 | **Next** | Redesign RL reward (add boundary penalty, tie effort to fuel) and retrain | ⬜ |
 | **Next** | Wire v2 RTA into `spacecraft_env.py` as the default interlock | ⬜ |
-| **Next** | Add independent-integrator RK4 test for CW STM correctness | ⬜ |
-| **Next** | Set up real CI (GitHub Actions) to replace static badge | ⬜ |
-| **Future** | Gazebo Harmonic physics + ROS 2 middleware nodes | ⬜ |
-| **Future** | YOLOv8 + solvePnP perception layer | ⬜ |
-| **Future** | LangChain mission planner | ⬜ |
-| **Future** | Optuna HPO curriculum manager | ⬜ |
+| **Phase 1 (unverified here)** | Gazebo Harmonic plugin + ROS 2 middleware nodes exist in `ros2_ws` | 🟡 |
+| **Phase 1 (unverified here)** | YOLOv8 + solvePnP perception layer exists in `ros2_ws` | 🟡 |
+| **Phase 1 (unverified here)** | LLM mission planner exists in `ros2_ws` (+ offline default) | 🟡 |
+| **Phase 1 (unverified here)** | Optuna HPO curriculum manager exists in `ros2_ws` | 🟡 |
 
 ---
 

@@ -13,9 +13,8 @@ import json
 from pathlib import Path
 from typing import Callable, Sequence
 
-import numpy as np
 
-from spaceforge_mvp.config import MissionConfig
+from spaceforge_mvp.config import ControllerConfig, MissionConfig, PhysicsConfig, RunConfig
 from spaceforge_mvp.control.glideslope import glideslope_action, hot_approach_action
 from spaceforge_mvp.viz.record import record_episode, rl_controller
 
@@ -67,6 +66,16 @@ def run(args: argparse.Namespace) -> dict:
         goal_type=args.goal,
     )
 
+    run_config = RunConfig(
+        mission=mission,
+        physics=PhysicsConfig(n=mission.mean_motion, dt=mission.dt),
+        controller=ControllerConfig(
+            name=args.controller, checkpoint=args.checkpoint, deterministic=not args.nondeterministic
+        ),
+        safety_mode=args.safety,
+        seed=args.seed,
+    )
+
     if args.controller == "rl":
         controller: Callable = rl_controller(args.checkpoint, deterministic=not args.nondeterministic)
     elif args.controller == "hot":
@@ -78,29 +87,13 @@ def run(args: argparse.Namespace) -> dict:
         controller,
         seed=args.seed,
         label=args.controller,
-        mission=mission,
+        run_config=run_config,
         safety=args.safety,
         annotate_continuous=True,
         goal_type=args.goal,
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    (args.output_dir / "mission.json").write_text(json.dumps({
-        "controller": args.controller,
-        "checkpoint": args.checkpoint,
-        "start_pos": mission.start_pos,
-        "target_pos": mission.target_pos,
-        "start_vel": mission.start_vel,
-        "target_vel": mission.target_vel,
-        "relative_pos": mission.relative_pos,
-        "relative_vel": mission.relative_vel,
-        "initial_fuel": mission.initial_fuel,
-        "duration": mission.duration,
-        "dt": mission.dt,
-        "mean_motion": mission.mean_motion,
-        "safety": mission.safety_mode,
-        "goal": mission.goal_type,
-        "seed": args.seed,
-    }, indent=2))
+    run_config.write_json(args.output_dir / "mission.json")
     (args.output_dir / "telemetry.json").write_text(json.dumps(episode, indent=2))
     (args.output_dir / "metrics.json").write_text(json.dumps(episode["summary"], indent=2))
     print(json.dumps(episode["summary"], indent=2))

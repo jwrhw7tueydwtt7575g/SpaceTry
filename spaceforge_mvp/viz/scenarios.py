@@ -5,7 +5,6 @@ Writes JSON traces to spaceforge_mvp/viz/scenarios/ and prints the measured
 outcome of every scenario, so nothing shown in a video is hand-drawn.
 """
 
-from pathlib import Path
 from typing import Any, Dict
 
 from spaceforge_mvp.control.glideslope import glideslope_action, hot_approach_action

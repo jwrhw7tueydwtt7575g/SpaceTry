@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <world name="leo_orbit">
+    <gravity>0 0 0</gravity>
+    <physics name="fixed_step" type="ode"><max_step_size>0.1</max_step_size><real_time_factor>1</real_time_factor></physics>
+    <plugin filename="libspaceforge_cw_system.so" name="spaceforge_gazebo::CwDynamicsSystem">
+      <model_name>chaser</model_name><n>0.00113</n><max_accel>1.0</max_accel>
+    </plugin>
+    <model name="target"><static>true</static><pose>0 0 0 0 0 0</pose><link name="body"><visual name="visual"><geometry><box><size>1 1 1</size></box></geometry><material><ambient>0.1 0.5 1 1</ambient></material></visual><collision name="collision"><geometry><box><size>1 1 1</size></box></geometry></collision></link></model>
+    <include><uri>model://chaser</uri><name>chaser</name><pose>20 0 0 0 0 0</pose></include>
+  </world>
+</sdf>

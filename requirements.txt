@@ -1,3 +1,8 @@
+# Author pins — verified on Python 3.12 and below.
+# On Python 3.13 these exact numpy/matplotlib wheels have no build: use INSTRUCTIONS.md §1 instead:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   pip install gymnasium==1.3.0 stable-baselines3==2.9.0 numpy matplotlib pytest pillow
+# NOTE: install torch from the CPU index first; the default Linux wheel drags in ~GBs of CUDA this repo never uses.
 numpy==1.26.4
 gymnasium==1.3.0
 stable-baselines3==2.9.0

@@ -17,10 +17,11 @@ The resulting authority split is the one a real runtime-assurance layer has:
     braking law instead of the policy flying nothing at all.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import numpy as np
 
+from spaceforge_mvp.config import SAFETY_CONFIG, SafetyConfig
 from spaceforge_mvp.safety.mission_safety import evaluate_goal
 
 # Status string reported when the filter substitutes the braking action.
@@ -50,6 +51,7 @@ def apply_safety_filter(
     rel_vel: np.ndarray,
     fuel_remaining: float,
     goal_type: str = "APPROACH",
+    safety_config: SafetyConfig = SAFETY_CONFIG,
 ) -> Dict[str, Any]:
     """Return the command that may actually reach the thrusters.
 
@@ -72,6 +74,7 @@ def apply_safety_filter(
         current_speed=float(np.linalg.norm(vel)),
         commanded_action=cmd,
         rel_vel=vel,
+        safety_config=safety_config,
     )
     status = str(verdict["status"])
 

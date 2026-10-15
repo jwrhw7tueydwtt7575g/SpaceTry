@@ -20,3 +20,9 @@ dependencies = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["spaceforge_mvp*"]
+
+[tool.pytest.ini_options]
+# Scope to the pure-Python MVP suite. ros2_ws/ needs rclpy + Gazebo and
+# must be run separately (colcon pytest), otherwise root `pytest` errors
+# on collection even though the MVP is healthy.
+testpaths = ["spaceforge_mvp/tests"]

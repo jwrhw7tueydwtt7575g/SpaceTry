@@ -1,7 +1,6 @@
 """Tests for mission safety interlock module."""
 
 import numpy as np
-import pytest
 from spaceforge_mvp.safety.mission_safety import evaluate_goal
 
 

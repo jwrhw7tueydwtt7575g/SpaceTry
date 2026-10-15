@@ -2,7 +2,7 @@
 
 from typing import Dict, Optional
 import numpy as np
-from spaceforge_mvp.config import SAFETY_CONFIG
+from spaceforge_mvp.config import SAFETY_CONFIG, SafetyConfig
 
 SAFE_APPROACH_DIST: float = SAFETY_CONFIG.safe_approach_dist
 FUEL_FLOOR: float = SAFETY_CONFIG.fuel_floor
@@ -16,17 +16,21 @@ def evaluate_goal(
     current_speed: float,
     commanded_action: Optional[np.ndarray] = None,
     rel_vel: Optional[np.ndarray] = None,
+    safety_config: SafetyConfig = SAFETY_CONFIG,
 ) -> Dict[str, str]:
     """
     Evaluate candidate mission goal/action against mission safety constraints.
 
     Priority order:
-    1. fuel_remaining < FUEL_FLOOR -> emergency_hold, regardless of anything else.
-    2. goal_type == "APPROACH", current_dist < SAFE_APPROACH_DIST, and
-       current_speed > MAX_SAFE_CLOSING_SPEED:
+    1. fuel_remaining < safety_config.fuel_floor -> emergency_hold, regardless of anything else.
+    2. proximity speed gate (dist < safe_approach_dist and speed > max_safe_closing_speed):
+       - By default the gate applies only when goal_type is in
+         safety_config.proximity_goals (legacy: ("APPROACH",)).
+       - Set safety_config.enforce_proximity_for_all_goals=True to make the gate
+         purely geometric so no goal label can disable protection (recommended).
        - If commanded_action and rel_vel are provided, allow braking/decelerating
-         thrust (where u dot v < 0 or speed decreases), rejecting only accelerating thrust.
-       - Otherwise, reject non-braking approach commands.
+          thrust (where u dot v < 0 or speed decreases), rejecting only accelerating thrust.
+        - Otherwise, reject non-braking approach commands.
     3. else -> accepted.
 
     Parameters
@@ -50,18 +54,18 @@ def evaluate_goal(
         Dictionary with keys 'status' ("accepted" | "rejected" | "emergency_hold")
         and 'reason' (explanation string).
     """
-    if fuel_remaining < FUEL_FLOOR:
+    if fuel_remaining < safety_config.fuel_floor:
         return {
             "status": "emergency_hold",
             "reason": (
-                f"Fuel remaining ({fuel_remaining:.4f}) is below minimum safety floor ({FUEL_FLOOR})."
+                f"Fuel remaining ({fuel_remaining:.4f}) is below minimum safety floor ({safety_config.fuel_floor})."
             ),
         }
 
     if (
-        goal_type == "APPROACH"
-        and current_dist < SAFE_APPROACH_DIST
-        and current_speed > MAX_SAFE_CLOSING_SPEED
+        (safety_config.enforce_proximity_for_all_goals or goal_type in safety_config.proximity_goals)
+        and current_dist < safety_config.safe_approach_dist
+        and current_speed > safety_config.max_safe_closing_speed
     ):
         # Check if the commanded action is a braking / decelerating action
         if commanded_action is not None and rel_vel is not None and current_speed > 1e-6:
@@ -79,8 +83,8 @@ def evaluate_goal(
         return {
             "status": "rejected",
             "reason": (
-                f"Goal '{goal_type}' rejected: distance ({current_dist:.2f}m) < {SAFE_APPROACH_DIST:.2f}m "
-                f"with excessive speed ({current_speed:.2f}m/s > {MAX_SAFE_CLOSING_SPEED:.2f}m/s)."
+                f"Goal '{goal_type}' rejected: distance ({current_dist:.2f}m) < {safety_config.safe_approach_dist:.2f}m "
+                f"with excessive speed ({current_speed:.2f}m/s > {safety_config.max_safe_closing_speed:.2f}m/s)."
             ),
         }
 

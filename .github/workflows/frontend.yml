@@ -1,0 +1,20 @@
+name: frontend
+on:
+  push:
+  pull_request:
+jobs:
+  dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Pure state logic (no browser, no network)
+        run: node ros2_ws/src/spaceforge_observability/dashboard/src/state.test.js
+      - name: Syntax check browser bundle
+        run: |
+          node --check ros2_ws/src/spaceforge_observability/dashboard/src/state.js
+          node --check ros2_ws/src/spaceforge_observability/dashboard/src/app.js
+      - name: Browser smoke (real React + Three in jsdom, WebGL off)
+        run: bash ros2_ws/src/spaceforge_observability/dashboard/smoke/install.sh

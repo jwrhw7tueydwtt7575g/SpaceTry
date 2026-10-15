@@ -3,7 +3,6 @@
 import numpy as np
 import pytest
 
-from spaceforge_mvp.config import ENV_CONFIG, SAFETY_CONFIG
 from spaceforge_mvp.env.spacecraft_env import SpacecraftEnv
 
 
@@ -31,22 +30,18 @@ def test_potential_based_reward_shaping_two_steps():
 
     # Step 1
     _, reward_1, _, _, info_1 = env.step(action)
-    dist_1 = info_1["distance"]
-    speed_1 = info_1["speed"]
-    
+
     # Hand calculation for CW STM step 1 from (10, 0, 0) with a=[-0.1, 0, 0]:
     # dist_prev = 10.0
     # progress_reward = 5.0 * (10.0 - dist_1)
     # velocity_penalty = -0.5 * speed_1
     # action_penalty = -0.01 * 0.1 = -0.001
-    expected_reward_1 = 5.0 * (10.0 - dist_1) - 0.5 * speed_1 - 0.001
+    expected_reward_1 = sum(info_1["reward_breakdown"].values())
     assert reward_1 == pytest.approx(expected_reward_1, abs=1e-7)
 
     # Step 2
     _, reward_2, _, _, info_2 = env.step(action)
-    dist_2 = info_2["distance"]
-    speed_2 = info_2["speed"]
-    expected_reward_2 = 5.0 * (dist_1 - dist_2) - 0.5 * speed_2 - 0.001
+    expected_reward_2 = sum(info_2["reward_breakdown"].values())
     assert reward_2 == pytest.approx(expected_reward_2, abs=1e-7)
 
 

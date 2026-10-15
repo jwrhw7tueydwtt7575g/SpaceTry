@@ -1,7 +1,10 @@
 """Training script for Spacecraft rendezvous PPO policy using Stable-Baselines3."""
 
 import argparse
+import json
 import os
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -14,7 +17,7 @@ from stable_baselines3.common.callbacks import (
 )
 from stable_baselines3.common.monitor import Monitor
 
-from spaceforge_mvp.config import MissionConfig
+from spaceforge_mvp.config import MissionConfig, PhysicsConfig, RunConfig
 from spaceforge_mvp.env.spacecraft_env import SpacecraftEnv
 
 
@@ -37,6 +40,19 @@ class RewardTrackerCallback(BaseCallback):
         return True
 
 
+class MissionMetricsCallback(BaseCallback):
+    """Log reward components and safety telemetry to TensorBoard."""
+    def _on_step(self) -> bool:
+        for info in self.locals.get("infos", []):
+            for name, value in info.get("reward_breakdown", {}).items():
+                self.logger.record("mission/reward_" + name, float(value))
+            self.logger.record("mission/fuel_used", float(info.get("fuel_used", 0.0)))
+            self.logger.record("mission/safety_override", float(info.get("safety_override") is not None))
+            self.logger.record("mission/distance_m", float(info.get("distance", 0.0)))
+            self.logger.record("mission/speed_m_s", float(info.get("speed", 0.0)))
+        return True
+
+
 def make_env(env: Optional[SpacecraftEnv] = None) -> Monitor:
     """Instantiate and wrap SpacecraftEnv with SB3 Monitor."""
     if env is None:
@@ -49,12 +65,15 @@ def make_env(env: Optional[SpacecraftEnv] = None) -> Monitor:
 def train(
     total_timesteps: int = 200_000,
     save_freq: int = 1000,
-    save_dir: str = "checkpoints",
+    save_dir: str = "runs/ppo",
     tensorboard_log: Optional[str] = None,
     env: Optional[SpacecraftEnv] = None,
     eval_freq: int = 5000,
     verbose: int = 1,
     seed: int = 42,
+    checkpoint_path: Optional[str] = None,
+    allow_overwrite: bool = False,
+    run_config: RunConfig | None = None,
 ) -> Tuple[PPO, RewardTrackerCallback]:
     """
     Train PPO policy on SpacecraftEnv.
@@ -84,8 +103,12 @@ def train(
         The trained PPO model and the callback containing reward telemetry.
     """
     os.makedirs(save_dir, exist_ok=True)
+    if not allow_overwrite and checkpoint_path is None and any(Path(save_dir).glob("*.zip")):
+        raise FileExistsError(f"Checkpoint directory contains existing models; choose an explicit output path: {save_dir}")
+    if run_config is not None:
+        env = SpacecraftEnv(run_config=run_config)
     monitored_env = make_env(env)
-    eval_env = make_env()
+    eval_env = make_env(SpacecraftEnv(run_config=run_config)) if run_config else make_env()
 
     # Ensure at least one periodic checkpoint triggers even for short test runs
     effective_save_freq = min(save_freq, total_timesteps)
@@ -96,8 +119,9 @@ def train(
         name_prefix="ppo_spacecraft",
     )
     reward_tracker = RewardTrackerCallback()
+    mission_metrics = MissionMetricsCallback()
     
-    callbacks_list = [checkpoint_callback, reward_tracker]
+    callbacks_list = [checkpoint_callback, reward_tracker, mission_metrics]
     
     if total_timesteps >= 2000:
         eval_callback = EvalCallback(
@@ -125,9 +149,22 @@ def train(
 
     model.learn(total_timesteps=total_timesteps, callback=callbacks)
 
-    # Save final model checkpoint
-    final_checkpoint = os.path.join(save_dir, "ppo_spacecraft_final.zip")
+    # Never overwrite a shipped or prior checkpoint unless explicitly requested.
+    final_checkpoint = checkpoint_path or os.path.join(save_dir, "ppo_spacecraft_final.zip")
+    if os.path.exists(final_checkpoint) and not allow_overwrite:
+        raise FileExistsError(f"Checkpoint exists; choose an explicit new path or set allow_overwrite=True: {final_checkpoint}")
+    Path(final_checkpoint).parent.mkdir(parents=True, exist_ok=True)
     model.save(final_checkpoint)
+    metadata_path = Path(final_checkpoint).with_suffix(".metadata.json")
+    metadata = {
+        "schema_version": 1, "checkpoint": str(final_checkpoint),
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "total_timesteps": int(total_timesteps), "seed": int(seed),
+        "ppo": {"n_steps": 512, "batch_size": 64, "gamma": 0.99},
+        "run_config": run_config.to_dict() if run_config else None,
+        "acceptance_thresholds": {"min_success_rate": 0.85, "max_avg_fuel_used": 0.35, "max_safety_overrides_per_episode": 1.0},
+    }
+    metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True))
 
     return model, reward_tracker
 
@@ -150,8 +187,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--save_dir",
         type=str,
-        default="checkpoints",
-        help="Directory to save checkpoints (default: checkpoints)",
+        default="runs/ppo",
+        help="Directory to save checkpoints (default: runs/ppo)",
     )
     parser.add_argument(
         "--tensorboard_log",
@@ -185,6 +222,7 @@ if __name__ == "__main__":
     if any(value is not None for value in mission_values) and not all(value is not None for value in mission_values):
         raise SystemExit("When configuring a fixed training mission, provide all position, velocity, fuel, duration, dt, and mean-motion flags.")
     training_env = None
+    training_run_config = None
     if all(value is not None for value in mission_values):
         if not 0.0 <= args.fuel <= 1.0 or args.duration <= 0 or args.dt <= 0 or args.mean_motion <= 0:
             raise SystemExit("fuel must be in [0, 1]; duration, dt, and mean-motion must be positive.")
@@ -194,7 +232,8 @@ if __name__ == "__main__":
             initial_fuel=args.fuel, duration=args.duration, dt=args.dt,
             mean_motion=args.mean_motion, safety_mode=args.safety, goal_type=args.goal,
         )
-        training_env = SpacecraftEnv(mission=mission)
+        training_run_config = RunConfig(mission=mission, physics=PhysicsConfig(n=mission.mean_motion, dt=mission.dt), safety_mode=args.safety, seed=args.seed)
+        training_env = SpacecraftEnv(run_config=training_run_config)
     train(
         total_timesteps=args.total_timesteps,
         save_freq=args.save_freq,
@@ -202,4 +241,5 @@ if __name__ == "__main__":
         tensorboard_log=args.tensorboard_log,
         seed=args.seed,
         env=training_env,
+        run_config=training_run_config,
     )

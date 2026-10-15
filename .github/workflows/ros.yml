@@ -1,0 +1,38 @@
+name: ros
+# ROS 2 Humble + Gazebo Harmonic gate. NOT verifiable on a plain Python host:
+# it needs the OSRF apt repositories and ~GBs of simulator binaries. Locally,
+# every ROS-dependent test skips cleanly; this workflow is the only place the
+# live ROS/Gazebo/C++ paths are claimed, and only when this workflow is green.
+on:
+  push:
+  pull_request:
+jobs:
+  colcon:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ROS 2 Humble + Gazebo Harmonic
+        run: |
+          sudo apt update
+          sudo apt install -y curl gnupg lsb-release
+          sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+            -o /usr/share/keyrings/ros-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" \
+            | sudo tee /etc/apt/sources.list.d/ros2.list
+          sudo curl -sSL https://packages.osrfoundation.org/gazebo.gpg \
+            --output /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] http://packages.osrfoundation.org/gazebo/ubuntu-stable $(lsb_release -cs) main" \
+            | sudo tee /etc/apt/sources.list.d/gazebo-stable.list
+          sudo apt update
+          sudo apt install -y ros-humble-ros-base ros-humble-ament-cmake-python \
+            python3-colcon-common-extensions gz-harmonic
+      - name: Build workspace (Python + C++ incl. Gazebo plugin)
+        run: |
+          source /opt/ros/humble/setup.bash
+          colcon build --cmake-args -DBUILD_TESTING=ON
+      - name: Live ROS tests (C++ plugin, bridge contract, gated live tests)
+        run: |
+          source /opt/ros/humble/setup.bash
+          source install/setup.bash
+          colcon test --event-handlers console_direct+
+          colcon test-result --verbose

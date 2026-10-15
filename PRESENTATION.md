@@ -51,7 +51,7 @@ Autonomous Rendezvous, Proximity Operations, and Docking (RPO/Docking) represent
 3. **Design a Certified Classical Reference Controller:** Construct an analytical Glideslope guidance law with feedforward drift cancellation achieving 100% docking convergence across randomized seeds.
 4. **Engineer an Active-Braking Runtime Assurance (RTA v2) Safety Filter:** Implement a directional projection filter ($u \cdot v \le 0$) that converts reckless collision trajectories into gentle captures.
 5. **Develop a CLI-Driven Orchestration Layer:** Provide a unified simulation engine (`simulate.py`) allowing arbitrary initial states, target positions, fuel levels, and timesteps, with automated telemetry and dashboard export.
-6. **Deliver 100% Test Coverage:** Implement rigorous unit and integration tests (28 test cases) verifying all mathematical and software boundaries.
+6. **Deliver 100% Test Coverage:** Implement rigorous unit and integration tests (64 test cases) verifying all mathematical and software boundaries.
 
 ---
 
@@ -110,7 +110,7 @@ flowchart TD
 * **Core Language:** Python 3.10+ / 3.12 (Pure Python numerical architecture).
 * **Numerical Mathematics:** NumPy (Matrix dynamics, vector projections, Euclidean kinematics).
 * **Reinforcement Learning:** Gymnasium (RL environment specification) & Stable-Baselines3 (PPO implementation).
-* **Testing & Quality Assurance:** Pytest (28 automated unit, integration, and smoke test suites).
+* **Testing & Quality Assurance:** Pytest (40 automated unit, integration, and smoke test suites).
 * **Data Visualization & Analytics:** Matplotlib (2D trajectory rendering, telemetry curves).
 * **Video Encoding:** FFmpeg (1920×1080 broadcast MP4 rendering at 30 fps).
 * **Interactive Frontend:** HTML5, Tailwind CSS, Canvas API, JavaScript (Standalone zero-dependency dashboard).
@@ -231,7 +231,7 @@ Output: Applied thrust u_applied, override status, verdict reason
 3. **Safety Interlock Breakthrough (v1 vs v2):**
    * *v1 Zeroing Veto:* Reduced impact speed from $6.48\text{ m/s}$ to $2.00\text{ m/s}$, but still caused a collision because momentum carried the chaser through the target.
    * *v2 Active Braking:* Successfully arrested relative momentum within $8$ seconds, bringing the craft to $0.01\text{ m/s}$ and achieving soft capture.
-4. **Verification Integrity:** All **28 unit and integration tests** pass deterministically across dynamics, environment, RTA logic, and CLI mission parsing.
+4. **Verification Integrity:** All **40 unit and integration tests** pass deterministically across dynamics, environment, RTA logic, and CLI mission parsing.
 
 ---
 
