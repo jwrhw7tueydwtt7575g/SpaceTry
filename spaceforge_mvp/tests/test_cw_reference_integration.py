@@ -103,7 +103,7 @@ def test_fuel_depletion_truncates_before_timeout_with_custom_rate():
 def test_resolved_docking_threshold_and_v2_authority_are_applied():
     mission = MissionConfig(
         start_pos=(0.4, 0.0, 0.0), target_pos=(0.0, 0.0, 0.0),
-        start_vel=(0.05, 0.0, 0.0), target_vel=(0.0, 0.0, 0.0),
+        start_vel=(-0.05, 0.0, 0.0), target_vel=(0.0, 0.0, 0.0),  # closing on the target
         initial_fuel=0.5, duration=1.0, dt=0.01, mean_motion=0.00113,
         safety_mode="v2",
     )
@@ -115,7 +115,9 @@ def test_resolved_docking_threshold_and_v2_authority_are_applied():
     )
     env = SpacecraftEnv(run_config=config)
     env.reset(seed=1)
-    _, _, terminated, _, info = env.step(np.array([1.0, 0.0, 0.0]))
+    # Accelerating toward the target while already above the (custom, 0.02 m/s)
+    # envelope: v2 must take over using the run's thresholds, not module defaults.
+    _, _, terminated, _, info = env.step(np.array([-1.0, 0.0, 0.0]))
     assert info["safety_override"] == "braking_substituted"
     assert terminated
     assert info["is_success"]

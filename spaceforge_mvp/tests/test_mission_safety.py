@@ -42,15 +42,15 @@ def test_case_3_fuel_below_floor_triggers_emergency_hold():
     assert "reason" in result
 
 
-def test_case_4_inspect_at_close_distance_accepted():
-    """Case 4: fuel=0.5, dist=3, speed=0.5, 'INSPECT' -> accepted (distance check is APPROACH-only)."""
+def test_case_4_inspect_at_close_distance_is_gated():
+    """Case 4: fuel=0.5, dist=3, speed=0.5, 'INSPECT' -> rejected (the gate is geometric)."""
     result = evaluate_goal(
         goal_type="INSPECT",
         current_dist=3.0,
         fuel_remaining=0.5,
         current_speed=0.5,
     )
-    assert result["status"] == "accepted"
+    assert result["status"] == "rejected"
     assert "reason" in result
 
 
@@ -78,3 +78,23 @@ def test_case_6_approach_close_distance_excessive_speed_braking_thrust_accepted(
     )
     assert result["status"] == "accepted"
     assert "Braking" in result["reason"] or "accepted" in result["reason"]
+
+
+def test_case_7_coasting_is_not_braking():
+    """A zero command inside the bubble at excessive speed is coasting, not braking."""
+    result = evaluate_goal(
+        goal_type="APPROACH", current_dist=3.0, fuel_remaining=0.5, current_speed=0.5,
+        commanded_action=np.zeros(3), rel_vel=np.array([-0.5, 0.0, 0.0]),
+    )
+    assert result["status"] == "rejected"
+
+
+def test_case_8_token_braking_with_lateral_thrust_is_rejected():
+    """u.v < 0 with a large lateral component speeds the vehicle up: rejected."""
+    vel = np.array([-0.3, 0.0, 0.0])
+    cmd = np.array([0.01, 1.0, 1.0])
+    result = evaluate_goal(
+        goal_type="APPROACH", current_dist=2.0, fuel_remaining=0.5, current_speed=0.3,
+        commanded_action=cmd, rel_vel=vel,
+    )
+    assert result["status"] == "rejected"

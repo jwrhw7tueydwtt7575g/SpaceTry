@@ -50,14 +50,17 @@ def test_docking_success_requires_low_relative_speed():
     env = SpacecraftEnv()
     env.reset(seed=42)
 
-    # Case A: dist < 0.5m but high speed (0.5 m/s) -> NOT successful
+    # Case A: dist < 0.5m but high speed (0.5 m/s) -> NOT successful: it is a
+    # collision, which ends the episode with a penalty.
     env.rel_pos = np.array([0.4, 0.0, 0.0], dtype=np.float64)
     env.rel_vel = np.array([0.5, 0.0, 0.0], dtype=np.float64)
-    _, _, terminated, _, info = env.step(np.array([0.0, 0.0, 0.0]))
-    assert not terminated, "High relative speed docking attempt should fail"
-    assert not info["is_success"]
+    _, reward, terminated, _, info = env.step(np.array([0.0, 0.0, 0.0]))
+    assert not info["is_success"], "High relative speed docking attempt should fail"
+    assert terminated and info["collision"]
+    assert info["reward_breakdown"]["collision"] < 0.0
 
     # Case B: dist < 0.5m AND low speed (0.05 m/s) -> SUCCESSFUL
+    env.reset(seed=42)
     env.rel_pos = np.array([0.4, 0.0, 0.0], dtype=np.float64)
     env.rel_vel = np.array([0.05, 0.0, 0.0], dtype=np.float64)
     _, _, terminated, _, info = env.step(np.array([0.0, 0.0, 0.0]))

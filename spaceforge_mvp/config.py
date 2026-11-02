@@ -29,16 +29,27 @@ class SafetyConfig:
     fuel_floor: float = 0.05            # Minimum fuel fraction emergency threshold
     max_safe_closing_speed: float = 0.2 # Maximum safe speed inside 5m bubble (m/s)
     max_docking_speed: float = 0.1      # Maximum allowable relative speed at docking (<0.5m)
-    # Proximity rule scope. Default preserves the legacy APPROACH-only behaviour
-    # so existing callers/tests are unaffected. Set enforce_proximity_for_all_goals
-    # to True (recommended for flight) so geometry alone triggers the speed gate
-    # and a goal label can never disable protection.
+    # Capture sphere used by the runtime-assurance filter for fly-through checks.
+    capture_radius: float = 0.5
+    # Floor of the distance-dependent closing-speed envelope, as a fraction of
+    # max_docking_speed. The envelope tapers from max_safe_closing_speed at the
+    # bubble edge down to this floor, so a vehicle held to it arrives slowly
+    # enough to be captured instead of striking the target.
+    capture_speed_fraction: float = 0.5
+    # Proximity rule scope. By default the speed gate is purely geometric: no
+    # goal label can disable collision protection. Setting
+    # enforce_proximity_for_all_goals=False restores the legacy label-scoped
+    # behaviour (only goals listed in proximity_goals are gated).
     proximity_goals: Tuple[str, ...] = ("APPROACH",)
-    enforce_proximity_for_all_goals: bool = False
+    enforce_proximity_for_all_goals: bool = True
 
     def __post_init__(self) -> None:
         if self.safe_approach_dist <= 0.0 or self.max_safe_closing_speed <= 0.0:
             raise ValueError("Safety distances and speeds must be positive")
+        if self.max_docking_speed <= 0.0 or self.capture_radius <= 0.0:
+            raise ValueError("Docking speed and capture radius must be positive")
+        if not 0.0 < self.capture_speed_fraction <= 1.0:
+            raise ValueError("SafetyConfig.capture_speed_fraction must be in (0, 1]")
         if not 0.0 <= self.fuel_floor <= 1.0:
             raise ValueError("SafetyConfig.fuel_floor must be in [0, 1]")
         object.__setattr__(self, "proximity_goals", tuple(str(v) for v in self.proximity_goals))
@@ -66,13 +77,17 @@ class EnvConfig:
     collision_risk_penalty_weight: float = 5.0
     docking_bonus: float = 100.0
     work_volume_bound: float = 100.0
+    # A pass through the capture sphere at or above the docking speed is a
+    # collision: the episode terminates and this penalty is applied.
+    collision_penalty: float = 50.0
+    terminate_on_collision: bool = True
 
     def __post_init__(self) -> None:
         if self.max_steps < 1:
             raise ValueError("EnvConfig.max_steps must be at least one")
         if min(self.pos_norm_scale, self.vel_norm_scale, self.initial_pos_bound, self.initial_vel_bound, self.docking_success_dist, self.work_volume_bound) <= 0.0:
             raise ValueError("Environment scales and bounds must be positive")
-        if min(self.progress_reward_weight, self.velocity_penalty_weight, self.action_penalty_weight, self.divergence_penalty_weight, self.fuel_penalty_weight, self.collision_risk_penalty_weight, self.docking_bonus) < 0.0:
+        if min(self.progress_reward_weight, self.velocity_penalty_weight, self.action_penalty_weight, self.divergence_penalty_weight, self.fuel_penalty_weight, self.collision_risk_penalty_weight, self.docking_bonus, self.collision_penalty) < 0.0:
             raise ValueError("Reward weights and docking_bonus must be non-negative")
 
 

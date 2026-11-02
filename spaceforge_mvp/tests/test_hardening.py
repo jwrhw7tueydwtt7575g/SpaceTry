@@ -9,9 +9,17 @@ from spaceforge_mvp.config import SafetyConfig
 from spaceforge_mvp.safety.mission_safety import evaluate_goal
 
 
-def test_legacy_goal_gating_preserved_by_default():
-    # INSPECT bypass is legacy load-bearing behaviour — must not change silently.
-    out = evaluate_goal(goal_type="INSPECT", current_dist=3.0, fuel_remaining=0.5, current_speed=0.5)
+def test_proximity_gate_is_geometric_by_default():
+    # A goal label must never disable collision protection by default.
+    for goal in ("INSPECT", "DOCK", "ANYTHING"):
+        out = evaluate_goal(goal_type=goal, current_dist=3.0, fuel_remaining=0.5, current_speed=0.5)
+        assert out["status"] == "rejected", goal
+
+
+def test_legacy_label_scoped_gating_is_opt_in():
+    legacy = SafetyConfig(enforce_proximity_for_all_goals=False)
+    out = evaluate_goal(goal_type="INSPECT", current_dist=3.0, fuel_remaining=0.5,
+                        current_speed=0.5, safety_config=legacy)
     assert out["status"] == "accepted"
 
 
@@ -30,7 +38,7 @@ def test_strict_mode_makes_proximity_purely_geometric():
 
 
 def test_custom_proximity_goals_extend_scope():
-    cfg = SafetyConfig(proximity_goals=("APPROACH", "DOCK"))
+    cfg = SafetyConfig(proximity_goals=("APPROACH", "DOCK"), enforce_proximity_for_all_goals=False)
     out = evaluate_goal(
         goal_type="DOCK",
         current_dist=3.0,
@@ -52,9 +60,9 @@ def test_safety_config_round_trips_through_runconfig(tmp_path):
         initial_fuel=0.8, duration=2, dt=1.0, mean_motion=0.00113,
         safety_mode="v2",
     )
-    cfg = RunConfig(mission=mission, safety=SafetyConfig(enforce_proximity_for_all_goals=True), safety_mode="v2")
+    cfg = RunConfig(mission=mission, safety=SafetyConfig(enforce_proximity_for_all_goals=False), safety_mode="v2")
     restored = RunConfig.read_json(cfg.write_json(tmp_path / "m.json"))
-    assert restored.safety.enforce_proximity_for_all_goals is True
+    assert restored.safety.enforce_proximity_for_all_goals is False
     assert restored.safety.proximity_goals == ("APPROACH",)
 
 

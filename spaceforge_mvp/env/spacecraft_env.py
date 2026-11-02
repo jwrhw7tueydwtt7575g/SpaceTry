@@ -23,8 +23,10 @@ Reward components are reported in ``info["reward_breakdown"]``.  Position terms
     and docking success respectively; their sum is the scalar reward.
 
 Episode ends:
-    terminated=True  -> dist < docking_success_dist AND speed < max_docking_speed
-    truncated=True   -> fuel exhausted or max_steps reached
+    terminated=True  -> docked: dist < docking_success_dist AND speed < max_docking_speed
+    terminated=True  -> collision: the step swept through the capture sphere at or
+                        above max_docking_speed (penalty ``collision_penalty``)
+    truncated=True   -> fuel exhausted, left the work volume, or max_steps reached
 """
 
 from typing import Any, Dict, Optional, Tuple
@@ -175,6 +177,21 @@ class SpacecraftEnv(gym.Env):
             "reward_breakdown": {},
         }
 
+    def _swept_collision(self, pos0: np.ndarray, vel0: np.ndarray, accel: np.ndarray, dt: float, samples: int = 10) -> bool:
+        """Did the step pass through the capture sphere at or above docking speed?
+
+        The environment samples once per step, so a fast fly-through can jump
+        over the 0.5 m capture sphere between samples. The step is re-sampled
+        with constant-acceleration kinematics (CW coupling over one step is
+        negligible against the actuator authority) to catch it.
+        """
+        taus = np.linspace(float(dt) / samples, float(dt), samples)[:, None]
+        p = pos0 + vel0 * taus + 0.5 * accel * taus ** 2
+        v = vel0 + accel * taus
+        inside = np.linalg.norm(p, axis=1) < self.env_config.docking_success_dist
+        fast = np.linalg.norm(v, axis=1) >= self.safety_config.max_docking_speed
+        return bool(np.any(inside & fast))
+
     # -------------------------------------------------------------------- gym API
     def reset(
         self,
@@ -241,13 +258,18 @@ class SpacecraftEnv(gym.Env):
         speed_prev = float(np.linalg.norm(self.rel_vel))
 
         goal_type = self.mission.goal_type if self.mission else APPROACH_GOAL
+        dt = float(self.physics_config.dt)
+        max_accel = float(self.actuator_config.max_cmd_accel)
         if self.safety_mode == "off":
-            applied = cmd
+            applied = cmd.copy()
             override = None
             safety_reason = "Safety interlock disabled."
         elif self.safety_mode == "v2":
-            decision = apply_safety_filter(cmd, self.rel_pos, self.rel_vel, self.fuel, goal_type, self.safety_config)
-            applied = np.asarray(decision["applied"], dtype=np.float64)
+            decision = apply_safety_filter(
+                cmd, self.rel_pos, self.rel_vel, self.fuel, goal_type, self.safety_config,
+                dt=dt, max_accel=max_accel, n=float(self.physics_config.n),
+            )
+            applied = np.asarray(decision["applied"], dtype=np.float64).copy()
             override = decision["override"]
             safety_reason = str(decision["reason"])
         else:
@@ -259,16 +281,20 @@ class SpacecraftEnv(gym.Env):
                 commanded_action=cmd,
                 rel_vel=np.asarray(self.rel_vel, dtype=np.float64),
                 safety_config=self.safety_config,
+                dt=dt,
+                max_accel=max_accel,
             )
             status = str(verdict["status"])
-            applied = cmd if status == "accepted" else np.zeros(3, dtype=np.float64)
+            applied = cmd.copy() if status == "accepted" else np.zeros(3, dtype=np.float64)
             override = None if status == "accepted" else status
             safety_reason = str(verdict["reason"])
 
         # --- faults (post-interlock, pre-physics): stuck -> bias -> dropout ---
+        # Work on a copy: faults change what the thrusters do, not what the
+        # interlock decided, and telemetry must keep the two apart.
         faults = self.fault_config
         fault_active: Optional[str] = None
-        disturbed = np.asarray(applied, dtype=np.float64)
+        disturbed = np.array(applied, dtype=np.float64, copy=True)
         if faults is not None and not faults.is_identity:
             if faults.stuck_axis is not None:
                 disturbed[faults.stuck_axis] = faults.stuck_value
@@ -277,6 +303,9 @@ class SpacecraftEnv(gym.Env):
             if faults.dropout_prob > 0.0 and float(self.np_random.uniform()) < faults.dropout_prob:
                 disturbed = np.zeros(3, dtype=np.float64)
                 fault_active = "command_dropout"
+        # Thruster throttle actually fired (normalized, saturated): this is what
+        # consumes propellant, including faulty firings.
+        throttle = np.clip(disturbed, -1.0, 1.0)
 
         # --- domain: mass/inertia scaling + thruster noise, then clip ---
         domain = self.domain_config
@@ -287,24 +316,27 @@ class SpacecraftEnv(gym.Env):
             if domain.thrust_noise_std > 0.0:
                 disturbed = disturbed + self.np_random.normal(0.0, domain.thrust_noise_std, size=3)
         accel_cmd = np.clip(
-            disturbed * mass_scale * self.actuator_config.max_cmd_accel,
-            -self.actuator_config.max_cmd_accel,
-            self.actuator_config.max_cmd_accel,
+            disturbed * mass_scale * max_accel,
+            -max_accel,
+            max_accel,
         )
 
         # --- physics: exact CW state transition matrix ---
+        prev_pos = np.array(self.rel_pos, dtype=np.float64, copy=True)
+        prev_vel = np.array(self.rel_vel, dtype=np.float64, copy=True)
         next_pos, next_vel = cw_step(
             self.rel_pos,
             self.rel_vel,
             accel_cmd,
-            dt=self.physics_config.dt,
+            dt=dt,
             n=self.physics_config.n,
         )
         self.rel_pos = np.asarray(next_pos, dtype=np.float64)
         self.rel_vel = np.asarray(next_vel, dtype=np.float64)
 
-        thrust_mag = float(np.sum(np.abs(applied)))
-        fuel_debit = self.actuator_config.fuel_rate_scale * thrust_mag
+        thrust_mag = float(np.sum(np.abs(throttle)))
+        fuel_used = max(0.0, float(self.actuator_config.fuel_rate_scale * thrust_mag))
+        fuel_debit = fuel_used
         if faults is not None and faults.fuel_leak_rate > 0.0:
             fuel_debit += faults.fuel_leak_rate
             fault_active = fault_active or "fuel_leak"
@@ -314,7 +346,6 @@ class SpacecraftEnv(gym.Env):
         dist = float(np.linalg.norm(self.rel_pos))
         speed = float(np.linalg.norm(self.rel_vel))
 
-        fuel_used = max(0.0, float(self.actuator_config.fuel_rate_scale * thrust_mag))
         progress = self.env_config.progress_reward_weight * (dist_prev - dist)
         divergence = -self.env_config.divergence_penalty_weight * max(0.0, dist - dist_prev)
         velocity = -self.env_config.velocity_penalty_weight * speed
@@ -330,12 +361,20 @@ class SpacecraftEnv(gym.Env):
             dist < self.env_config.docking_success_dist
             and speed < self.safety_config.max_docking_speed
         )
+        collision = False
+        if not is_success and self.env_config.terminate_on_collision:
+            collision = self._swept_collision(prev_pos, prev_vel, accel_cmd, dt)
         terminated = False
         truncated = False
         docking = 0.0
+        collision_term = 0.0
         if is_success:
             docking = self.env_config.docking_bonus
             reward += docking
+            terminated = True
+        elif collision:
+            collision_term = -self.env_config.collision_penalty
+            reward += collision_term
             terminated = True
         elif self.fuel <= 0.0 or self.step_count >= self.max_steps or dist > self.env_config.work_volume_bound:
             truncated = True
@@ -348,6 +387,8 @@ class SpacecraftEnv(gym.Env):
             applied_action=applied,
             safety_reason=safety_reason,
         )
+        info["collision"] = bool(collision)
+        info["out_of_bounds"] = bool(truncated and dist > self.env_config.work_volume_bound)
         info["collision_risk"] = float(risk)
         info["fuel_used"] = float(fuel_used)
         info["domain"] = {
@@ -355,11 +396,12 @@ class SpacecraftEnv(gym.Env):
             "effectiveness": [float(v) for v in self.episode_effectiveness],
         }
         info["fault"] = fault_active
+        info["thruster_command"] = np.asarray(throttle, dtype=np.float64)
         info["executed_action"] = np.asarray(accel_cmd, dtype=np.float64)
         info["reward_breakdown"] = {
             "progress": float(progress), "divergence": float(divergence),
             "velocity": float(velocity), "fuel": float(fuel_penalty),
             "action_effort": float(effort), "collision_risk": float(collision_risk),
-            "docking_success": float(docking),
+            "docking_success": float(docking), "collision": float(collision_term),
         }
         return self._get_obs(), float(reward), terminated, truncated, info
