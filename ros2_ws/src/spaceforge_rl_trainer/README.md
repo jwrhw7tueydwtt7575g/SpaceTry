@@ -1,4 +1,4 @@
-# Blueprint rl_trainer
+# spaceforge_rl_trainer
 
 The trainer defaults to Stable-Baselines3 PPO; SAC is an explicitly selectable
 alternative via `algorithm: SAC`, `--algorithm SAC`, or `config/stage1_sac.yaml`.
@@ -8,8 +8,8 @@ timesteps, output directory, scenario, seeds, max steps, evaluation settings,
 checkpoint/evaluation frequencies, TensorBoard, resume path, actuator limits,
 acceptance gates, and PPO/SAC hyperparameters.
 
-Dependencies: `pip install stable-baselines3 pyyaml` (plus torch CPU-first per
-the root INSTRUCTIONS.md). YAML configs require PyYAML.
+Dependencies: `pip install stable-baselines3 pyyaml` (install CPU torch first, see
+docs/usage.md). YAML configs require PyYAML.
 
 Example YAML (`config/stage1_ppo.yaml`; SAC mirror in `config/stage1_sac.yaml`):
 algorithm: PPO

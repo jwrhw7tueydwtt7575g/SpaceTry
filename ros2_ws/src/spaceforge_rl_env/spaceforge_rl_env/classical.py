@@ -1,4 +1,4 @@
-"""Stage-1 deterministic baseline proof on the Python oracle."""
+"""Stage-1 deterministic baseline proof on the Python backend."""
 from dataclasses import dataclass
 import numpy as np
 from spaceforge_mvp.config import MissionConfig, PhysicsConfig, RunConfig

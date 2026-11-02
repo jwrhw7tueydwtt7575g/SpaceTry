@@ -1,4 +1,4 @@
-"""Episode recorder — turns any controller into a replayable telemetry trace.
+"""Episode recorder: runs any controller and returns a replayable telemetry trace.
 
 Everything the visualisation layer needs comes from here, so the videos and the
 dashboard are driven by the same numbers a test would assert on: no hand-drawn
@@ -107,9 +107,9 @@ def record_episode(
     initial : (pos, vel), optional
         Override the random reset with a fixed starting state.
     safety : {"v1", "v2", "off"}
-        "v1"  — interlock vetoes by zeroing the thrust (the MVP behaviour).
-        "v2"  — interlock vetoes by substituting certified braking (see control.rta).
-        "off" — command goes straight to the thrusters, the counterfactual.
+        "v1"   interlock vetoes by zeroing the thrust.
+        "v2"   runtime-assurance filter substitutes the backup or a brake (see control.rta).
+        "off"  command goes straight to the thrusters.
     annotate_continuous : bool
         Also compute the continuous-time closest approach (fine sub-stepping).
     """

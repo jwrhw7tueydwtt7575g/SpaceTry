@@ -1,7 +1,7 @@
 # SpaceForge observability
 
-Live telemetry alongside the standalone replay — which is untouched and keeps
-working (`spaceforge_mvp/viz/dashboard.html`, built by `spaceforge_mvp.viz.dashboard`).
+Live telemetry from the ROS stack or from recorded runs. The offline browser simulator
+(`spaceforge_mvp/viz/dashboard.html`) is separate and does not need this package.
 
 ## Schema first (TELEMETRY_SCHEMA.md)
 
@@ -9,7 +9,7 @@ Every message is `{schema_version: 1, stream, seq, stamp_ns, frame_id, payload}`
 over ten streams: odometry, target_pose, commanded, applied_command, fuel,
 safety_event, episode_metrics, curriculum_state, tensorboard, llm_trace.
 Unknown streams, version mismatches, and invalid payloads are rejected with a
-reason and counted — never crashing the bridge.
+reason and counted; the bridge keeps running.
 
 ## Bridge (`spaceforge-observability`)
 

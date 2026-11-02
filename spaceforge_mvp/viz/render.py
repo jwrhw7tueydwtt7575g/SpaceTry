@@ -1,4 +1,4 @@
-"""Broadcast-style renderer: telemetry traces -> MP4 animations.
+"""Video renderer: telemetry traces -> MP4.
 
 Design goals: legible at a glance, no default-matplotlib look, and every number
 on screen traceable to a recorded frame (no invented motion). Layout is a
@@ -505,17 +505,17 @@ def _draw_frame(fig, ax, tracks: List[Track], idx: int, rng, scale, title, subti
         trending_out = lookback > 4 and dists[i] > dists[i - lookback] + 0.15
 
         if t.summary.get("success") and idx >= len(t.frames) - 1:
-            status, scolor = "DOCKED — SOFT CAPTURE", GREEN
+            status, scolor = "DOCKED", GREEN
         elif over == "emergency_hold":
-            status, scolor = "INTERLOCK — EMERGENCY HOLD", RED
+            status, scolor = "FILTER: EMERGENCY HOLD", RED
         elif over == "rejected":
-            status, scolor = "INTERLOCK — THRUST REJECTED", RED
+            status, scolor = "FILTER: THRUST REJECTED", RED
         elif trending_out and c["dist"] > 2.0:
-            status, scolor = "DIVERGING — NO CAPTURE", RED
+            status, scolor = "MOVING AWAY", RED
         elif c["dist"] < KEEP_OUT:
-            status, scolor = "INSIDE KEEP-OUT — GLIDESLOPE", AMBER
+            status, scolor = "INSIDE KEEP-OUT ZONE", AMBER
         else:
-            status, scolor = "APPROACH — CLOSING", CYAN
+            status, scolor = "APPROACH", CYAN
 
         closing = -float(np.dot(c["pos"], c["vel"])) / max(c["dist"], 1e-9)
         rows_all = [

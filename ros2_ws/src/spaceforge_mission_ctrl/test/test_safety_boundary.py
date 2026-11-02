@@ -146,7 +146,7 @@ def test_command_that_would_breach_the_limit_is_held():
 
 
 # ---------------------------------------------------------- RTA reuse + invariants
-def test_brake_matches_proven_rta_law():
+def test_brake_matches_rta_law():
     from spaceforge_mvp.control.rta import certified_brake_action
     rng = np.random.default_rng(11)
     for _ in range(50):

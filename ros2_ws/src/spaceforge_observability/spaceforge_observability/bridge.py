@@ -11,13 +11,13 @@ Data plane is plain JSON envelopes (see schema.py). Control messages carry a
 
 Robustness contract:
   backpressure: per-client bounded buffer (default 256); full buffers drop the
-    oldest envelope and count it — a slow client never blocks others.
+    oldest envelope and count it, so a slow client never blocks others.
   connection loss: disconnects unregister the client and free its buffer; the
     bridge and all other clients continue. Clients reconnect with backoff.
   stale data: per-stream last-seen source stamps; status snapshots flag any
     stream older than its bound.
   privacy: payloads are secret-redacted before history, fan-out, or logging.
-  malformed input: validated with a reason, counted, replied as error — the
+  malformed input: validated with a reason, counted, replied as error; the
     connection stays up and nothing raises past the edge.
 """
 from collections import deque

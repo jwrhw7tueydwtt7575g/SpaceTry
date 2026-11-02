@@ -2,7 +2,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
 
-def test_phase1_layout_is_complete():
+def test_package_layout_is_complete():
     assert (ROOT / "package.xml").is_file()
     assert (ROOT / "CMakeLists.txt").is_file()
     assert (ROOT / "worlds" / "leo_orbit.sdf").is_file()

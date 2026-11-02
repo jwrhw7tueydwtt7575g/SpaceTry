@@ -99,7 +99,7 @@ class GeminiProvider:
     """Google Gemini REST adapter (stdlib only, no extra dependencies).
 
     Construction performs no network I/O. The API key travels only in the
-    request URL and is never placed in traces, logs, or exceptions — planner
+    request URL and is never placed in traces, logs, or exceptions; planner
     traces record token counts and the provider name, never credentials.
     Read the key from the environment (GEMINI_API_KEY), never commit it.
     """

@@ -1,6 +1,6 @@
 # SpaceForge observability telemetry schema v1
 
-All wire traffic — live bridge, replay files, dashboard state — uses one envelope:
+All wire traffic (live bridge, replay files, dashboard state) uses one envelope:
 
   {schema_version: 1, stream, seq, stamp_ns, frame_id, payload}
 

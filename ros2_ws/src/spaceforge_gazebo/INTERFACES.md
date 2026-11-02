@@ -1,4 +1,4 @@
-# Phase 1 interfaces
+# Gazebo interfaces
 
 Coordinate frame: relative LVLH/Hill frame centered on target. x is radial outward, y is along-track, z is orbit-normal. Gazebo world coordinates use metres and seconds; target is the origin.
 
@@ -10,4 +10,4 @@ Command: publish gz.msgs.Vector3d to <topic_prefix>/model/chaser/command/accel. 
 
 Reset: reset the Gazebo world. The initial position is the chaser's spawn pose; initial_velocity, n, max_accel, model_name and topic_prefix are SDF plugin parameters. A world reset (simulation time running backwards) re-initialises the state. Timestep: Gazebo simulation time is authoritative; the plugin integrates once per PreUpdate using UpdateInfo.dt and rejects non-positive dt.
 
-Safety and docking remain out of scope for Phase 1. The plugin is a dynamics/observability bridge; safety authority remains in the Python reference oracle stack.
+The plugin only propagates dynamics and publishes state. Safety is enforced by mission_ctrl and, in the Python stack, by the filters in spaceforge_mvp.

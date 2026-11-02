@@ -2,7 +2,7 @@
 
 Sources (all optional, all offline, no ROS/Gazebo):
   scenario / telemetry traces: spaceforge_mvp/viz/scenarios/*.json and
-    runs/*/telemetry.json — {summary, frames} with t/pos/vel/cmd/applied/
+    runs/*/telemetry.json: {summary, frames} with t/pos/vel/cmd/applied/
     override/dist/speed/fuel/dv per frame.
   training_report.json (rl_trainer): policy vs classical vs safety-filtered.
   hpo_report.json (auto_trainer): best-trial summary.

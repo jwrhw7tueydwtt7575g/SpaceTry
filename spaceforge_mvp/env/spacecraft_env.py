@@ -119,7 +119,7 @@ class SpacecraftEnv(gym.Env):
 
         With domain randomization, camera/IMU noise perturbs the observed
         position/velocity (and the bearing derived from them). The true state
-        in rel_pos/rel_vel — used for rewards and docking judgment — is exact.
+        in rel_pos/rel_vel, used for rewards and docking checks, is exact.
         """
         pos = np.asarray(self.rel_pos, dtype=np.float64)
         vel = np.asarray(self.rel_vel, dtype=np.float64)

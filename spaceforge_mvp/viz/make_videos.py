@@ -64,7 +64,7 @@ def build_manifest() -> Dict[str, Dict[str, Any]]:
                 "verdict": True,
                 "head_color": GREEN,
                 "stat_color": GREEN,
-                "lines": ["The certified law never needs a veto — the interlock stays silent."],
+                "lines": ["The glideslope never trips the interlock."],
                 "stats": [("Closest approach", f"{dock['min_dist']:.3f} m"),
                           ("Contact speed", f"{dock['end_speed']:.3f} m/s"),
                           ("Δv", f"{dock['dv']:.2f} m/s"),
@@ -99,7 +99,7 @@ def build_manifest() -> Dict[str, Dict[str, Any]]:
                 "verdict": True,
                 "head_color": GREEN if rl["success"] else RED,
                 "stat_color": GREEN if rl["success"] else RED,
-                "lines": ([f"The learned policy captures in {rl['duration']:.0f} s; the certified glideslope",
+                "lines": ([f"The learned policy captures in {rl['duration']:.0f} s; the glideslope",
                            f"does it in {dock['duration']:.0f} s on less fuel -- RL is not yet the better pilot."]
                           if rl["success"] else
                           [f"Closest approach {rl['min_dist']:.2f} m; episode ended: {rl['terminal_reason']}.",
@@ -115,7 +115,7 @@ def build_manifest() -> Dict[str, Dict[str, Any]]:
             "title": "Runtime assurance showdown",
             "subtitle": "Identical reckless law · 6 m start · 1 s step · 120 s horizon",
             "tracks": lambda: [
-                _load("hot_open", "NO PROTECTION — powered through", RED),
+                _load("hot_open", "NO FILTER: hits the target", RED),
                 _load("hot_v1", "v1 · THRUST ZEROED ON VETO", AMBER),
                 _load("hot_v2", "v2 · PREDICTIVE RTA + CERTIFIED BACKUP", GREEN),
             ],
@@ -138,7 +138,7 @@ def build_manifest() -> Dict[str, Dict[str, Any]]:
                 "stat_color": GREEN,
                 "lines": ["Denying a command is not braking: the veto still collided at "
                           f"{hot_1['continuous_min_speed']:.2f} m/s;",
-                          "predicting each step and flying the certified backup captures at "
+                          "predicting each step and flying the glideslope backup captures at "
                           f"{hot_2['continuous_min_speed']:.3f} m/s."],
                 "stats": [("No protection", f"{hot_o['continuous_min_speed']:.2f} m/s"),
                           ("Veto → zero thrust", f"{hot_1['continuous_min_speed']:.2f} m/s"),

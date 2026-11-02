@@ -1,7 +1,7 @@
 """Gemini provider tests: fully mocked default suite, env-gated live probe.
 
 The API key never appears in any committed file. Live calls only run when
-SPACEFORGE_GEMINI_API_KEY is set, and overload responses become a skip —
+SPACEFORGE_GEMINI_API_KEY is set, and overload responses become a skip:
 never a fake pass.
 """
 import io

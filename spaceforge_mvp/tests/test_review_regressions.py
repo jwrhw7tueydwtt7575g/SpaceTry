@@ -104,7 +104,7 @@ def test_cli_goal_label_cannot_disable_v2(tmp_path):
 
 
 # ---------------------------------------------------------------- visualisation
-def test_broadcast_renderer_draws_a_frame(tmp_path):
+def test_video_renderer_draws_a_frame(tmp_path):
     """render.py had 0% coverage and crashed under the old matplotlib pin."""
     from spaceforge_mvp.viz.preview import render_frames
 

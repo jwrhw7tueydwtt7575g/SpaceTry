@@ -51,7 +51,7 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("scenario")
     p.add_argument("indices", nargs="+", type=int)
-    p.add_argument("--title", default="SpaceForge RPO — certified glideslope")
+    p.add_argument("--title", default="SpaceForge: glideslope approach")
     p.add_argument("--subtitle", default="Clohessy-Wiltshire relative dynamics · 1 s step")
     p.add_argument("--out", default=str(SCENARIO_DIR.parent / "preview"))
     a = p.parse_args()

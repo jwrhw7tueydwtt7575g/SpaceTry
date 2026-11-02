@@ -1,4 +1,4 @@
-# Blueprint rl_env
+# spaceforge_rl_env
 
 This package freezes the 18-dimensional observation and 6-dimensional normalized force/torque action contract in contract.py. It runs on the pure Python SpacecraftEnv through MockTransport for fast deterministic unit tests, or on ROS 2 topics through RosTransportAdapter.
 

@@ -33,7 +33,7 @@ _HOLD_CODES = (
 
 
 def _brake(velocity, limits, mass_kg: float = 1.0, period_s: float = 1.0):
-    """Speed-sized certified braking force, clipped to authority.
+    """Speed-sized braking force, clipped to authority.
 
     A single scalar authority (the smallest axis limit) keeps the force exactly
     anti-parallel to the velocity; its magnitude never exceeds what cancels the
@@ -80,7 +80,7 @@ def closing_unsafe(telemetry, constraints: ConstraintConfig) -> bool:
 def _hold_or_brake(telemetry, constraints, code, reason, event_id) -> FilterResult:
     """Safe output when the command or goal cannot be trusted."""
     if closing_unsafe(telemetry, constraints):
-        return FilterResult(_brake_command(telemetry, constraints), True, code, reason + "; certified braking enforced", event_id)
+        return FilterResult(_brake_command(telemetry, constraints), True, code, reason + "; braking enforced", event_id)
     return FilterResult(_zero(), True, code, reason + "; safe hold enforced", event_id)
 
 
@@ -89,7 +89,7 @@ def filter_action(goal: GoalSpec, telemetry: Telemetry, commanded: ActuatorComma
     if validation.code in _HOLD_CODES:
         return _hold_or_brake(telemetry, constraints, validation.code, validation.reason, event_id)
     if goal.goal_type is GoalType.ABORT:
-        return FilterResult(_brake_command(telemetry, constraints), True, ReasonCode.ABORT_ENFORCED, "ABORT goal enforces certified braking", event_id)
+        return FilterResult(_brake_command(telemetry, constraints), True, ReasonCode.ABORT_ENFORCED, "ABORT goal enforces braking", event_id)
     if goal.goal_type is GoalType.SAFE_HOLD:
         return _hold_or_brake(telemetry, constraints, ReasonCode.SAFE_HOLD_ENFORCED, "SAFE_HOLD goal enforces zero discretionary thrust", event_id)
 
@@ -122,7 +122,7 @@ def filter_action(goal: GoalSpec, telemetry: Telemetry, commanded: ActuatorComma
                      and float(np.linalg.norm(next_vel)) <= float(np.linalg.norm(vel)))
         if not improving:
             return FilterResult(_brake_command(telemetry, constraints), True, ReasonCode.CLOSING_SPEED_EXCEEDED,
-                                "command does not reduce closing speed inside keep-out; certified braking enforced", event_id)
+                                "command does not reduce closing speed inside keep-out; braking enforced", event_id)
     elif float(np.linalg.norm(next_pos)) < constraints.keep_out_radius_m and closing_next > constraints.max_closing_speed_mps:
         return FilterResult(_zero(), True, ReasonCode.CLOSING_SPEED_EXCEEDED,
                             "command would exceed the closing-speed limit inside keep-out; safe hold enforced", event_id)
