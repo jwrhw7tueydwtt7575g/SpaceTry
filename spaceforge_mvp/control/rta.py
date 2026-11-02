@@ -9,8 +9,11 @@ v2 is a predictive, minimal-intervention filter:
 
 1. It predicts one control step ahead under the commanded thrust and checks the
    whole step against a distance-dependent closing-speed envelope
-   (``closing_speed_limit``) plus a capture-sphere fly-through test. The policy
-   keeps authority whenever the predicted step is safe.
+   (``closing_speed_limit``) plus a capture-sphere fly-through test. Outside
+   the keep-out sphere the envelope is a braking curve, so the vehicle always
+   reaches the sphere edge at or below the gate speed instead of arriving hot
+   and braking inside. The policy keeps authority whenever the predicted step
+   is safe.
 2. When the predicted step is unsafe, the policy's command is discarded for
    that step and the certified backup controller flies instead (Simplex
    architecture): the glideslope law, whose approach profile sits inside the
@@ -93,9 +96,9 @@ def envelope_correction(
         return certified_brake_action(vel, max_accel=max_accel, dt=dt)
     away = pos / dist  # unit vector pointing from the target to the chaser
     closing = closing_speed(pos, vel)
-    limit_now = closing_speed_limit(dist, safety_config)
+    limit_now = closing_speed_limit(dist, safety_config, max_accel)
     look_ahead = max(0.0, dist - limit_now * float(dt))
-    target_closing = margin * min(limit_now, closing_speed_limit(look_ahead, safety_config))
+    target_closing = margin * min(limit_now, closing_speed_limit(look_ahead, safety_config, max_accel))
     if closing <= target_closing:
         return np.zeros(3, dtype=np.float64)
     # Raise the outward radial velocity by (closing - target_closing).
@@ -141,7 +144,7 @@ def apply_safety_filter(
 
     if fuel_remaining < safety_config.fuel_floor:
         # Discretionary thrust stops; collision avoidance does not.
-        if gated and predict_unsafe(pos, vel, np.zeros(3), dt, safety_config):
+        if gated and predict_unsafe(pos, vel, np.zeros(3), dt, safety_config, max_accel=max_accel):
             return {
                 "applied": envelope_correction(pos, vel, safety_config, max_accel, dt),
                 "override": EMERGENCY_BRAKE,
@@ -156,11 +159,11 @@ def apply_safety_filter(
             "reason": f"Fuel ({fuel_remaining:.4f}) below floor ({safety_config.fuel_floor}): emergency hold.",
         }
 
-    if not gated or not predict_unsafe(pos, vel, cmd * float(max_accel), dt, safety_config):
+    if not gated or not predict_unsafe(pos, vel, cmd * float(max_accel), dt, safety_config, max_accel=max_accel):
         return {"applied": cmd, "override": None, "reason": "Predicted step satisfies the approach envelope."}
 
     backup = glideslope_action(pos, vel, n=n, dt=dt, max_accel=max_accel)
-    if not predict_unsafe(pos, vel, backup * float(max_accel), dt, safety_config):
+    if not predict_unsafe(pos, vel, backup * float(max_accel), dt, safety_config, max_accel=max_accel):
         return {
             "applied": backup,
             "override": BRAKING_SUBSTITUTED,
