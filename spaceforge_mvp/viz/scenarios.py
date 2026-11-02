@@ -26,14 +26,14 @@ HOT_START = ([6.0, 0.0, 0.0], [0.0, 0.0, 0.0])
 def build(write: bool = True) -> Dict[str, Dict[str, Any]]:
     traces: Dict[str, Dict[str, Any]] = {}
 
-    # 1. The certified glideslope docking — the hero run.
+    # 1. Glideslope docking.
     traces["docking"] = record_episode(
         glideslope_action, seed=42, label="Certified glideslope",
         initial=DOCK_START, safety="v1",
     )
 
     # 2. The shipped RL checkpoint, either under its own steam or with the
-    #    certified controller holding the stick.
+    #    glideslope flying.
     traces["rl_policy"] = record_episode(
         rl_controller(CHECKPOINT), seed=42, label="Shipped PPO checkpoint",
         safety="v1", annotate_continuous=False,
@@ -52,9 +52,9 @@ def build(write: bool = True) -> Dict[str, Dict[str, Any]]:
     )
 
     # 5. Same slam under runtime assurance v2: predictive envelope filter with
-    #    the certified glideslope as backup controller.
+    #    the glideslope as backup controller.
     traces["hot_v2"] = record_episode(
-        hot_approach_action, seed=7, label="Reckless slam, RTA v2 (predictive filter + certified backup)",
+        hot_approach_action, seed=7, label="Reckless slam, RTA v2 (predictive filter + glideslope backup)",
         initial=HOT_START, safety="v2", max_steps=120, annotate_continuous=True,
     )
 

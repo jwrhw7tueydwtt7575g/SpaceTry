@@ -192,7 +192,7 @@
       renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
     } catch (e) { return false; }
     var scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x04070c);
+    scene.background = new THREE.Color(0x0f1115);
     var camera = new THREE.PerspectiveCamera(50, canvas.width / canvas.height, 0.1, 20000);
     camera.position.set(20, -24, 15);
 
@@ -210,13 +210,13 @@
     scene.add(new THREE.Points(starGeo,
       new THREE.PointsMaterial({ color: 0x8fa1b5, size: 2.2, sizeAttenuation: false })));
 
-    var grid = new THREE.GridHelper(120, 24, 0x1b2635, 0x111a26);
+    var grid = new THREE.GridHelper(120, 24, 0x262a31, 0x1a1d22);
     grid.rotation.x = Math.PI / 2;
     scene.add(grid);
 
     // Target station: bus + twin wings with technical edge lines.
     var station = new THREE.Group();
-    var edgeMat = new THREE.LineBasicMaterial({ color: 0x5cd4ff });
+    var edgeMat = new THREE.LineBasicMaterial({ color: 0x5b9cf5 });
     var bus = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.4, 1.4),
       new THREE.MeshBasicMaterial({ color: 0x22303f }));
     station.add(bus);
@@ -232,11 +232,11 @@
 
     var keepOut = new THREE.Mesh(
       new THREE.SphereGeometry(5, 32, 24),
-      new THREE.MeshBasicMaterial({ color: 0xffb547, wireframe: true, transparent: true, opacity: 0.16 }));
+      new THREE.MeshBasicMaterial({ color: 0xe0a53a, wireframe: true, transparent: true, opacity: 0.16 }));
     scene.add(keepOut);
     var capture = new THREE.Mesh(
       new THREE.SphereGeometry(0.5, 24, 18),
-      new THREE.MeshBasicMaterial({ color: 0x3fdd9b, wireframe: true, transparent: true, opacity: 0.5 }));
+      new THREE.MeshBasicMaterial({ color: 0x4cb782, wireframe: true, transparent: true, opacity: 0.5 }));
     scene.add(capture);
     var keepLabel = makeLabelSprite("keep-out 5 m", "#FFB454");
     keepLabel.position.set(0, 0, 5.4);
@@ -245,7 +245,7 @@
     // Chaser: cone aligned to velocity + glow sprite.
     var chaser = new THREE.Group();
     var cone = new THREE.Mesh(new THREE.ConeGeometry(0.45, 1.4, 20),
-      new THREE.MeshBasicMaterial({ color: 0x5cd4ff }));
+      new THREE.MeshBasicMaterial({ color: 0x5b9cf5 }));
     cone.rotation.x = Math.PI / 2;
     chaser.add(cone);
     var glow = new THREE.Sprite(new THREE.SpriteMaterial({
@@ -384,9 +384,9 @@
     var history = store.history.odometry || [];
     var w = canvas.width;
     var h = canvas.height;
-    ctx.fillStyle = "#04070c";
+    ctx.fillStyle = "#0f1115";
     ctx.fillRect(0, 0, w, h);
-    ctx.strokeStyle = "#1b2635";
+    ctx.strokeStyle = "#262a31";
     var g;
     for (g = 0; g <= 10; g++) {
       ctx.beginPath(); ctx.moveTo((w / 10) * g, 0); ctx.lineTo((w / 10) * g, h); ctx.stroke();
@@ -403,7 +403,7 @@
     var cy = h / 2;
     ctx.strokeStyle = "#FFB454";
     ctx.beginPath(); ctx.arc(cx, cy, 5 * scale, 0, Math.PI * 2); ctx.stroke();
-    ctx.strokeStyle = "#5cd4ff";
+    ctx.strokeStyle = "#5b9cf5";
     ctx.beginPath();
     history.forEach(function (e, i) {
       var p = e.payload.position_m;
@@ -432,7 +432,7 @@
     var plotH = Math.max(10, h - padT - padB);
     var points = config.points;
     if (!points.length) {
-      ctx.fillStyle = "#54657a";
+      ctx.fillStyle = "#6c727c";
       ctx.font = "12px 'JetBrains Mono', ui-monospace, monospace";
       ctx.fillText("awaiting " + config.stream + "…", padL + 8, padT + 16);
       return;
@@ -455,7 +455,7 @@
     if (hi - lo < 1e-9) hi = lo + 1;
     function X(t) { return padL + ((t - t0) / (t1 - t0)) * plotW; }
     function Y(v) { return padT + plotH - ((v - lo) / (hi - lo)) * plotH; }
-    ctx.strokeStyle = "#1b2635";
+    ctx.strokeStyle = "#262a31";
     ctx.lineWidth = 1;
     for (var g = 0; g <= 4; g++) {
       var gy = padT + (plotH / 4) * g;
@@ -470,7 +470,7 @@
       ctx.font = "10px 'JetBrains Mono', ui-monospace, monospace";
       ctx.fillText(t.label, padL + 4, Y(scale(t.v)) - 4);
     });
-    ctx.strokeStyle = "#5cd4ff";
+    ctx.strokeStyle = "#5b9cf5";
     ctx.lineWidth = 1.6;
     ctx.beginPath();
     points.forEach(function (p, i) {
@@ -481,13 +481,13 @@
     ctx.stroke();
     if (chartHover >= 0 && chartHover < points.length) {
       var hp = points[chartHover];
-      ctx.strokeStyle = "#e9f1f8";
+      ctx.strokeStyle = "#e3e5e8";
       ctx.beginPath(); ctx.moveTo(X(hp.t), padT); ctx.lineTo(X(hp.t), padT + plotH); ctx.stroke();
-      ctx.fillStyle = "#e9f1f8";
+      ctx.fillStyle = "#e3e5e8";
       ctx.font = "11px 'JetBrains Mono', ui-monospace, monospace";
       ctx.fillText(config.format(hp.v) + " @ " + ObsState.fmtClock(hp.t * 1e9), padL + 6, padT + 14);
     }
-    ctx.fillStyle = "#54657a";
+    ctx.fillStyle = "#6c727c";
     ctx.font = "10px 'JetBrains Mono', ui-monospace, monospace";
     ctx.fillText(config.unit, 6, padT + 12);
   }
@@ -670,9 +670,9 @@
       React.createElement("a", { className: "skip", href: "#content" }, "Skip to content"),
       React.createElement("div", { className: "mark", "aria-label": "SpaceForge mission console" },
         React.createElement("svg", { width: 30, height: 30, viewBox: "0 0 30 30", "aria-hidden": "true" },
-          React.createElement("circle", { cx: 15, cy: 15, r: 4, fill: "none", stroke: "#5cd4ff", strokeWidth: 1.6 }),
-          React.createElement("ellipse", { cx: 15, cy: 15, rx: 12, ry: 5.5, fill: "none", stroke: "#5cd4ff", strokeWidth: 1.2, transform: "rotate(-24 15 15)" }),
-          React.createElement("circle", { cx: 25, cy: 9, r: 2, fill: "#5cd4ff" })),
+          React.createElement("circle", { cx: 15, cy: 15, r: 4, fill: "none", stroke: "#5b9cf5", strokeWidth: 1.6 }),
+          React.createElement("ellipse", { cx: 15, cy: 15, rx: 12, ry: 5.5, fill: "none", stroke: "#5b9cf5", strokeWidth: 1.2, transform: "rotate(-24 15 15)" }),
+          React.createElement("circle", { cx: 25, cy: 9, r: 2, fill: "#5b9cf5" })),
         React.createElement("div", null,
           React.createElement("div", { className: "mark-name" }, "SpaceForge"),
           React.createElement("div", { className: "mark-sub" }, "Mission console"))),

@@ -3,9 +3,9 @@
 Retry contract (explicit, no hidden behavior):
   retried: transient provider errors (timeouts, transport failures) up to
     max_retries. Each attempt is recorded in the trace.
-  never retried: deterministic outcomes — token/cost overruns, malformed or
+  never retried: deterministic outcomes (token/cost overruns, malformed or
     versioned-out proposals, forbidden actuator fields, prompt-injection-like
-    text, contradictory goals, and mission_ctrl rejections. These fail fast to
+    text, contradictory goals, and mission_ctrl rejections). These fail fast to
     SAFE_HOLD without burning further provider calls.
 """
 import json

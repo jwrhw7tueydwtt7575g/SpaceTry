@@ -1,4 +1,4 @@
-"""Workflow smoke tests for the Blueprint rl_trainer (mock env only).
+"""Workflow smoke tests for rl_trainer (mock env only).
 
 Live Gazebo training is never exercised here; see test_trainer_live_gazebo.py,
 which skips unless the host advertises ROS 2 + Gazebo dependencies.

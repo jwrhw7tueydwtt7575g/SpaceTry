@@ -11,7 +11,7 @@ The executable spaceforge_sim_bridge is the only ROS 2/Gazebo transport translat
 | spaceforge/chaser/lidar/scan | sensor_msgs/msg/LaserScan | Gazebo -> ROS | chaser_lidar; metres, radians | 10 Hz | SensorDataQoS |
 | spaceforge/chaser/cmd_wrench | geometry_msgs/msg/WrenchStamped | ROS -> Gazebo | target_lvlh; force N, torque N m | command rate | reliable, depth 10 |
 
-Gazebo topics are derived from the scenario/world prefix: /world/leo_orbit/clock, /world/leo_orbit/model/chaser/pose, /world/leo_orbit/model/chaser/velocity, and sensor topics below the chaser body. The bridge publishes acceleration Vector3d to /world/leo_orbit/model/chaser/command/accel after dividing wrench force by chaser_mass_kg. The CW point-mass plugin has no rotational actuator, so wrench torque is not interpreted as policy or safety; it is outside Phase 1 dynamics.
+Gazebo topics are derived from the scenario/world prefix: /world/leo_orbit/clock, /world/leo_orbit/model/chaser/pose, /world/leo_orbit/model/chaser/velocity, and sensor topics below the chaser body. The bridge publishes acceleration Vector3d to /world/leo_orbit/model/chaser/command/accel after dividing wrench force by chaser_mass_kg. The CW point-mass plugin has no rotational actuator, so wrench torque is ignored.
 
 All forwarded messages preserve the Gazebo simulation timestamp. Header frame IDs are configurable parameters but default to target_lvlh, chaser_base, chaser_imu, chaser_camera, and chaser_lidar. Rates are bridge publication caps, not simulator clock rates.
 

@@ -15,7 +15,7 @@ v2 is a predictive, minimal-intervention filter:
    and braking inside. The policy keeps authority whenever the predicted step
    is safe.
 2. When the predicted step is unsafe, the policy's command is discarded for
-   that step and the certified backup controller flies instead (Simplex
+   that step and the backup controller flies instead (Simplex
    architecture): the glideslope law, whose approach profile sits inside the
    envelope. If even the backup's command is predicted unsafe (the vehicle is
    already far above the envelope), an envelope-tracking brake is used: the
@@ -150,7 +150,7 @@ def apply_safety_filter(
                 "override": EMERGENCY_BRAKE,
                 "reason": (
                     f"Fuel ({fuel_remaining:.4f}) below floor ({safety_config.fuel_floor}) on a collision "
-                    "trajectory: reserve spent on certified braking."
+                    "trajectory: reserve spent on braking."
                 ),
             }
         return {
@@ -169,7 +169,7 @@ def apply_safety_filter(
             "override": BRAKING_SUBSTITUTED,
             "reason": (
                 "Commanded thrust predicted to violate the approach envelope: policy authority "
-                "revoked for this step, certified glideslope backup substituted."
+                "revoked for this step, glideslope backup substituted."
             ),
         }
     return {

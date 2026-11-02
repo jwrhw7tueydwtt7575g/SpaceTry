@@ -1,4 +1,4 @@
-/* SpaceForge Mission Lab -- simulation core.
+/* SpaceForge docking simulator: simulation core.
  *
  * A line-for-line port of the Python reference stack:
  *   core/cw_dynamics.py       -> cwStep, cwAccel

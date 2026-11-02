@@ -195,7 +195,7 @@ class MissionConfig:
 @dataclass(frozen=True)
 class ActuatorConfig:
     """Action conversion and fuel-consumption parameters."""
-    max_cmd_accel: float = 0.1  # m/s^2 per unit command; see MVP_SUMMARY.md (RL learnability)
+    max_cmd_accel: float = 0.1  # m/s^2 per unit command; PPO does not learn at 1.0 (docs/design.md)
     fuel_rate_scale: float = 0.001
 
     def __post_init__(self) -> None:

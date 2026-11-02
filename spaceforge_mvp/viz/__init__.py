@@ -1,8 +1,8 @@
 """Visualisation layer for the SpaceForge MVP.
 
-``record``  — replays any controller and emits a telemetry trace (JSON)
-``render``  — renders traces to broadcast-style MP4 animations
-``dashboard`` — emits a self-contained interactive HTML replay of a trace
+``record``    runs any controller and returns a telemetry trace (JSON)
+``render``    renders traces to MP4
+``dashboard`` bundles the browser simulator in ``lab/`` into one HTML file
 """
 
 __all__ = ["record", "render", "dashboard"]

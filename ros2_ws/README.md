@@ -1,3 +1,6 @@
-# SpaceForge Phase 1 workspace
+# ROS 2 workspace
 
-This optional ROS 2 Humble/Gazebo Harmonic integration does not replace spaceforgemvp/spaceforge_mvp, which remains the reference oracle. If ROS 2 or Gazebo is unavailable, run the Python test suite and treat this package as unvalidated until the host tools are installed.
+ROS 2 Humble and Gazebo Harmonic versions of the SpaceForge components. The pure Python package in
+`spaceforge_mvp/` is the reference implementation; several packages here import from it. See
+`docs/usage.md` for build and test commands. Without ROS 2 and Gazebo installed, the ROS-dependent
+tests skip.

@@ -1,7 +1,13 @@
-# SpaceForge ROS 2/Gazebo Phase 1
+# spaceforge_gazebo
 
-This package is separate from the Python MVP. It defines a minimal Gazebo Harmonic world (leo_orbit.sdf) with target and chaser models, sensor placeholders, and a C++17 CW system plugin. The Python simulator remains the reference oracle.
+A Gazebo Harmonic world (`worlds/leo_orbit.sdf`) with target and chaser models, a C++17 system
+plugin that propagates the chaser with the exact CW state transition matrix, and
+`spaceforge_sim_bridge`, which connects the plugin to ROS 2 topics.
 
-Host inspection result: this host has no ros2, gz, or gazebo executable. No launch or build claim is made here. On ROS 2 Humble plus Gazebo Harmonic, source /opt/ros/humble/setup.bash, run rosdep install, then colcon build --symlink-install --packages-select spaceforge_gazebo, source the workspace, and run ros2 launch spaceforge_gazebo leo_orbit.launch.py.
+```bash
+ros2 launch spaceforge_gazebo leo_orbit.launch.py headless:=true
+```
 
-Validate only on that host: gz sim -v 3 should start the world and gz topic -e -t /model/chaser/state should expose state. See INTERFACES.md.
+The `ros` CI job builds the package and runs a live test: it starts Gazebo headless with the
+bridge, sends a wrench command over ROS and checks that the chaser's velocity responds. Topic and
+frame details are in `INTERFACES.md` (Gazebo side) and `SIM_BRIDGE.md` (ROS side).

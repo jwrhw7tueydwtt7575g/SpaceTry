@@ -1,7 +1,7 @@
 <package format="3">
   <name>spaceforge_rl_env</name>
   <version>0.1.0</version>
-  <description>ROS-topic RL environment with pure Python oracle backend</description>
+  <description>ROS-topic RL environment with a pure Python backend</description>
   <maintainer email="spaceforge@example.invalid">SpaceForge</maintainer>
   <license>Apache-2.0</license>
   <buildtool_depend>ament_python</buildtool_depend>

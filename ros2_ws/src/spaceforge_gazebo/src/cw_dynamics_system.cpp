@@ -1,7 +1,7 @@
 // Clohessy-Wiltshire point-mass dynamics for the chaser model.
 //
 // The plugin owns the chaser's relative state and propagates it with the exact
-// CW state transition matrix -- the same closed form as the Python oracle in
+// CW state transition matrix -- the same closed form as the Python reference in
 // spaceforge_mvp/core/cw_dynamics.py -- once per Gazebo update. It then places
 // the model with a world-pose command (so Gazebo's own physics never fights
 // it) and publishes the ground-truth pose and velocity on the topics the ROS

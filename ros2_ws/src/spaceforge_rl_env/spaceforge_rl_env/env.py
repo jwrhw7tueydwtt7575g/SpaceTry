@@ -8,7 +8,7 @@ from .contract import (ACTION_DIM, OBSERVATION_DIM, ANGULAR_RATE_SCALE_RADPS, PO
 from .transport import MockTransport
 
 class SpacecraftRLEnv(gym.Env):
-    """Transport-backed environment; pure Python backend is the default fast oracle."""
+    """Transport-backed environment; the pure Python backend is the fast default."""
     metadata = {"render_modes": []}
     def __init__(self, backend=None, transport=None, action_limits: Optional[ActionLimits] = None, max_steps: int = 300, sensor_timeout_s: float = 0.25, docking_distance_m: float = 0.5, docking_speed_mps: float = 0.1):
         super().__init__()

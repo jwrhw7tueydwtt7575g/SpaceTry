@@ -1,4 +1,4 @@
-"""The browser Mission Lab is only trustworthy if its fixtures match Python.
+"""The browser simulator is only trustworthy if its fixtures match Python.
 
 ``lab/sim.test.js`` checks the JavaScript port against ``lab/fixtures.json``;
 these tests check that ``fixtures.json`` and ``policy.js`` are what the current

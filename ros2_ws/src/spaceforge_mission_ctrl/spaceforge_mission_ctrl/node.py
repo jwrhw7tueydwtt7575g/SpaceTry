@@ -13,7 +13,7 @@ def parse_goal_json(text: str) -> GoalSpec:
     """Parse a goal off the wire; raises ValueError on malformed input.
 
     The node never lets a malformed goal replace the last valid one, so no
-    producer — LLM, learned policy, or otherwise — can crash or bypass the
+    producer (LLM, learned policy or anything else) can crash or bypass the
     boundary with a bad message.
     """
     try:

@@ -172,7 +172,7 @@ def test_braking_action_never_increases_speed():
 def test_v2_takeover_lands_inside_the_envelope_or_slows_the_closure():
     """Every substituted step either ends inside the envelope or reduces the closing speed.
 
-    The certified backup may add speed to a slow vehicle (that is how it flies
+    The backup may add speed to a slow vehicle (that is how it flies
     the approach), so "never adds speed" is not the invariant; staying inside
     the closing-speed envelope is. The envelope brake is used only when the
     vehicle is already above it, and then the closure must shrink.
@@ -227,7 +227,7 @@ def test_v2_filter_turns_a_reckless_slam_into_a_soft_capture():
 
     # v2 recovers the identical approach into a soft capture, and never lets
     # the vehicle into the capture sphere at collision speed on the way.
-    assert ok_v2, "the certified backup should recover the reckless slam"
+    assert ok_v2, "the backup should recover the reckless slam"
     assert all(not (d < ENV_CONFIG.docking_success_dist and v >= 0.1) for d, v, *_ in log_v2)
     end_dist, end_speed = log_v2[-1][:2]
     assert end_dist < ENV_CONFIG.docking_success_dist
