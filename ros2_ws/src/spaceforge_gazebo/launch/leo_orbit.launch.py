@@ -1,11 +1,17 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess
+import os
+
+from launch.actions import AppendEnvironmentVariable, DeclareLaunchArgument, ExecuteProcess
+from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
     share = get_package_share_directory("spaceforge_gazebo")
+    # The CW system plugin installs to <prefix>/lib and the chaser model to
+    # share/models; Gazebo only finds them through these search paths.
+    prefix = os.path.dirname(os.path.dirname(share.rstrip("/")))
     scenario = LaunchConfiguration("scenario")
     world = PythonExpression(["\x27", share, "/worlds/\x27 + \x27", scenario, "\x27 + \x27.sdf\x27"])
     ros_namespace = LaunchConfiguration("namespace")
@@ -23,7 +29,14 @@ def generate_launch_description():
         DeclareLaunchArgument("imu_rate_hz", default_value="50.0"),
         DeclareLaunchArgument("camera_rate_hz", default_value="10.0"),
         DeclareLaunchArgument("lidar_rate_hz", default_value="10.0"),
-        ExecuteProcess(cmd=["gz", "sim", "-r", "-v", "3", world], output="screen"),
+        DeclareLaunchArgument("headless", default_value="false",
+                              description="Run the Gazebo server only (no GUI), e.g. on CI"),
+        AppendEnvironmentVariable("GZ_SIM_SYSTEM_PLUGIN_PATH", os.path.join(prefix, "lib")),
+        AppendEnvironmentVariable("GZ_SIM_RESOURCE_PATH", os.path.join(share, "models")),
+        ExecuteProcess(cmd=["gz", "sim", "-r", "-v", "3", world], output="screen",
+                       condition=UnlessCondition(LaunchConfiguration("headless"))),
+        ExecuteProcess(cmd=["gz", "sim", "-s", "-r", "-v", "3", world], output="screen",
+                       condition=IfCondition(LaunchConfiguration("headless"))),
         Node(package="spaceforge_gazebo", executable="spaceforge_sim_bridge", name="sim_bridge", namespace=ros_namespace, output="screen", parameters=[{
             "scenario": scenario, "ros_prefix": ros_prefix, "gz_prefix": gz_prefix, "use_sim_time": use_sim_time,
             "clock_rate_hz": LaunchConfiguration("clock_rate_hz"), "odometry_rate_hz": LaunchConfiguration("odometry_rate_hz"),

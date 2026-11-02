@@ -11,8 +11,9 @@ def to_ros_wrench(command, stamp_ns=0, frame_id="target_lvlh"):
         from geometry_msgs.msg import WrenchStamped
     except ImportError as exc: raise RuntimeError("geometry_msgs is required for ROS message conversion") from exc
     msg = WrenchStamped(); msg.header.stamp.sec = stamp_ns // 1_000_000_000; msg.header.stamp.nanosec = stamp_ns % 1_000_000_000; msg.header.frame_id = frame_id
-    msg.wrench.force.x, msg.wrench.force.y, msg.wrench.force.z = command.force_n
-    msg.wrench.torque.x, msg.wrench.torque.y, msg.wrench.torque.z = command.torque_nm
+    # rclpy message fields are strictly typed: ints must be converted to float.
+    msg.wrench.force.x, msg.wrench.force.y, msg.wrench.force.z = (float(v) for v in command.force_n)
+    msg.wrench.torque.x, msg.wrench.torque.y, msg.wrench.torque.z = (float(v) for v in command.torque_nm)
     return msg
 
 def to_ros_event(event):

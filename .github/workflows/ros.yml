@@ -25,7 +25,18 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/gazebo-stable.list
           sudo apt update
           sudo apt install -y ros-humble-ros-base ros-humble-ament-cmake-python \
-            python3-colcon-common-extensions gz-harmonic
+            python3-colcon-common-extensions gz-harmonic python3-pip
+      - name: Install Python dependencies of the ROS packages
+        # The ROS Python packages import spaceforge_mvp, gymnasium and SB3;
+        # without them their tests fail at import and never report results.
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python3 -m pip install -r requirements.txt pyyaml optuna opencv-python-headless==4.10.0.84
+          python3 -m pip install -e .
+          # A newer setuptools pulled in above breaks ament_python builds against
+          # jammy's packaging 21.3; pin the version ROS 2 Humble documents.
+          python3 -m pip install setuptools==58.2.0
       - name: Build workspace (Python + C++ incl. Gazebo plugin)
         run: |
           source /opt/ros/humble/setup.bash
@@ -34,5 +45,5 @@ jobs:
         run: |
           source /opt/ros/humble/setup.bash
           source install/setup.bash
-          colcon test --event-handlers console_direct+
+          colcon test --event-handlers console_direct+ --return-code-on-test-failure
           colcon test-result --verbose

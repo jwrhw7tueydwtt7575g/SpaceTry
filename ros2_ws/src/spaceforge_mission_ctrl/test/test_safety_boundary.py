@@ -152,7 +152,8 @@ def test_brake_matches_proven_rta_law():
     for _ in range(50):
         vel = rng.normal(0, 2, 3)
         got = _brake(vel, (1.0, 1.0, 1.0))
-        want = np.clip(certified_brake_action(vel), -1.0, 1.0)
+        # Default vehicle model: 1 N authority on 1 kg over a 1 s control period.
+        want = np.clip(certified_brake_action(vel, max_accel=1.0, dt=1.0), -1.0, 1.0)
         np.testing.assert_allclose(got, want, atol=1e-12)
         if float(np.linalg.norm(vel)) > 1e-9:
             assert float(np.dot(got, vel)) < 0.0
@@ -210,12 +211,15 @@ def test_every_override_is_audited_with_matching_content():
 
 
 def test_ros_adapters_fail_explicitly_without_ros():
+    # Without ROS the adapter must fail loudly; with ROS it must convert
+    # (integer inputs included -- rclpy float fields reject ints).
     try:
-        to_ros_wrench(ActuatorCommand((1, 0, 0), (0, 0, 0)), 2_000_000_001)
+        msg = to_ros_wrench(ActuatorCommand((1, 0, 0), (0, 0, 0)), 2_000_000_001)
     except RuntimeError as exc:
         assert "geometry_msgs" in str(exc)
     else:
-        raise AssertionError("expected geometry_msgs-dependent conversion to be explicit")
+        assert msg.wrench.force.x == 1.0 and isinstance(msg.wrench.force.x, float)
+        assert (msg.header.stamp.sec, msg.header.stamp.nanosec) == (2, 1)
     try:
         to_ros_event(None)
     except (RuntimeError, AttributeError, TypeError):

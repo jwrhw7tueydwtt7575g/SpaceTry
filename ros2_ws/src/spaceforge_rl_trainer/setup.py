@@ -10,6 +10,6 @@ setup(
         ("share/" + package_name, ["package.xml", "README.md"]),
         ("share/" + package_name + "/config", ["config/stage1_ppo.yaml", "config/stage1_sac.yaml"]),
     ],
-    zip_safe=True,
+    zip_safe=True, tests_require=["pytest"],
     entry_points={"console_scripts": ["spaceforge-rl-train = spaceforge_rl_trainer.cli:main"]},
 )
