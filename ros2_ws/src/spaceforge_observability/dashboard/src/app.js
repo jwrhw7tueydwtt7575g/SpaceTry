@@ -163,7 +163,7 @@
     var canvas = document.createElement("canvas");
     canvas.width = 256; canvas.height = 64;
     var ctx = canvas.getContext("2d");
-    ctx.font = "600 28px 'IBM Plex Mono', monospace";
+    ctx.font = "600 28px 'JetBrains Mono', ui-monospace, monospace";
     ctx.textAlign = "center";
     ctx.fillStyle = color || "#8FA1B5";
     ctx.fillText(text, 128, 42);
@@ -216,7 +216,7 @@
 
     // Target station: bus + twin wings with technical edge lines.
     var station = new THREE.Group();
-    var edgeMat = new THREE.LineBasicMaterial({ color: 0x46d8ff });
+    var edgeMat = new THREE.LineBasicMaterial({ color: 0x5cd4ff });
     var bus = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.4, 1.4),
       new THREE.MeshBasicMaterial({ color: 0x22303f }));
     station.add(bus);
@@ -232,11 +232,11 @@
 
     var keepOut = new THREE.Mesh(
       new THREE.SphereGeometry(5, 32, 24),
-      new THREE.MeshBasicMaterial({ color: 0xffb454, wireframe: true, transparent: true, opacity: 0.16 }));
+      new THREE.MeshBasicMaterial({ color: 0xffb547, wireframe: true, transparent: true, opacity: 0.16 }));
     scene.add(keepOut);
     var capture = new THREE.Mesh(
       new THREE.SphereGeometry(0.5, 24, 18),
-      new THREE.MeshBasicMaterial({ color: 0x3de08f, wireframe: true, transparent: true, opacity: 0.5 }));
+      new THREE.MeshBasicMaterial({ color: 0x3fdd9b, wireframe: true, transparent: true, opacity: 0.5 }));
     scene.add(capture);
     var keepLabel = makeLabelSprite("keep-out 5 m", "#FFB454");
     keepLabel.position.set(0, 0, 5.4);
@@ -245,7 +245,7 @@
     // Chaser: cone aligned to velocity + glow sprite.
     var chaser = new THREE.Group();
     var cone = new THREE.Mesh(new THREE.ConeGeometry(0.45, 1.4, 20),
-      new THREE.MeshBasicMaterial({ color: 0x46d8ff }));
+      new THREE.MeshBasicMaterial({ color: 0x5cd4ff }));
     cone.rotation.x = Math.PI / 2;
     chaser.add(cone);
     var glow = new THREE.Sprite(new THREE.SpriteMaterial({
@@ -403,7 +403,7 @@
     var cy = h / 2;
     ctx.strokeStyle = "#FFB454";
     ctx.beginPath(); ctx.arc(cx, cy, 5 * scale, 0, Math.PI * 2); ctx.stroke();
-    ctx.strokeStyle = "#46d8ff";
+    ctx.strokeStyle = "#5cd4ff";
     ctx.beginPath();
     history.forEach(function (e, i) {
       var p = e.payload.position_m;
@@ -433,7 +433,7 @@
     var points = config.points;
     if (!points.length) {
       ctx.fillStyle = "#54657a";
-      ctx.font = "12px 'IBM Plex Mono', monospace";
+      ctx.font = "12px 'JetBrains Mono', ui-monospace, monospace";
       ctx.fillText("awaiting " + config.stream + "…", padL + 8, padT + 16);
       return;
     }
@@ -467,10 +467,10 @@
       ctx.beginPath(); ctx.moveTo(padL, Y(scale(t.v))); ctx.lineTo(padL + plotW, Y(scale(t.v))); ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle = t.color;
-      ctx.font = "10px 'IBM Plex Mono', monospace";
+      ctx.font = "10px 'JetBrains Mono', ui-monospace, monospace";
       ctx.fillText(t.label, padL + 4, Y(scale(t.v)) - 4);
     });
-    ctx.strokeStyle = "#46d8ff";
+    ctx.strokeStyle = "#5cd4ff";
     ctx.lineWidth = 1.6;
     ctx.beginPath();
     points.forEach(function (p, i) {
@@ -484,11 +484,11 @@
       ctx.strokeStyle = "#e9f1f8";
       ctx.beginPath(); ctx.moveTo(X(hp.t), padT); ctx.lineTo(X(hp.t), padT + plotH); ctx.stroke();
       ctx.fillStyle = "#e9f1f8";
-      ctx.font = "11px 'IBM Plex Mono', monospace";
+      ctx.font = "11px 'JetBrains Mono', ui-monospace, monospace";
       ctx.fillText(config.format(hp.v) + " @ " + ObsState.fmtClock(hp.t * 1e9), padL + 6, padT + 14);
     }
     ctx.fillStyle = "#54657a";
-    ctx.font = "10px 'IBM Plex Mono', monospace";
+    ctx.font = "10px 'JetBrains Mono', ui-monospace, monospace";
     ctx.fillText(config.unit, 6, padT + 12);
   }
 
@@ -670,9 +670,9 @@
       React.createElement("a", { className: "skip", href: "#content" }, "Skip to content"),
       React.createElement("div", { className: "mark", "aria-label": "SpaceForge mission console" },
         React.createElement("svg", { width: 30, height: 30, viewBox: "0 0 30 30", "aria-hidden": "true" },
-          React.createElement("circle", { cx: 15, cy: 15, r: 4, fill: "none", stroke: "#46d8ff", strokeWidth: 1.6 }),
-          React.createElement("ellipse", { cx: 15, cy: 15, rx: 12, ry: 5.5, fill: "none", stroke: "#46d8ff", strokeWidth: 1.2, transform: "rotate(-24 15 15)" }),
-          React.createElement("circle", { cx: 25, cy: 9, r: 2, fill: "#46d8ff" })),
+          React.createElement("circle", { cx: 15, cy: 15, r: 4, fill: "none", stroke: "#5cd4ff", strokeWidth: 1.6 }),
+          React.createElement("ellipse", { cx: 15, cy: 15, rx: 12, ry: 5.5, fill: "none", stroke: "#5cd4ff", strokeWidth: 1.2, transform: "rotate(-24 15 15)" }),
+          React.createElement("circle", { cx: 25, cy: 9, r: 2, fill: "#5cd4ff" })),
         React.createElement("div", null,
           React.createElement("div", { className: "mark-name" }, "SpaceForge"),
           React.createElement("div", { className: "mark-sub" }, "Mission console"))),
