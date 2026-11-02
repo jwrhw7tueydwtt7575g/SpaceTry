@@ -1,4 +1,4 @@
-"""Bundle the Mission Lab into one self-contained HTML file.
+"""Bundle the browser docking simulator into one self-contained HTML file.
 
     python -m spaceforge_mvp.viz.dashboard
 

@@ -1,4 +1,4 @@
-/* SpaceForge Mission Lab -- interface.
+/* SpaceForge docking simulator: user interface.
  * Depends on SFSim (sim.js) and SF_POLICY (policy.js). No frameworks, no network.
  */
 (function () {
@@ -17,47 +17,62 @@
   const lerp = (a, b, t) => a + (b - a) * t;
 
   // ---------------------------------------------------------- palette
-  const COL = {
-    bg: '#04070d', text: '#e8eef7', muted: '#8b9ab0', faint: '#56657b', line: 'rgba(120,150,190,0.14)',
-    cyan: '#5cd4ff', amber: '#ffb547', orange: '#ff8a3d', violet: '#ac8dff', green: '#3fdd9b', red: '#ff5b6e',
-  };
-  const SOURCE_COL = { none: COL.faint, primary: COL.cyan, backup: COL.amber, brake: COL.orange, veto: COL.violet, hold: COL.violet };
-  const MODE_COL = { off: COL.red, v1: COL.violet, v2: COL.green };
-  const OUTCOME_COL = { docked: COL.green, collision: COL.red, timeout: '#7f8ea3', fuel: COL.orange, out_of_bounds: COL.violet };
-  const OUTCOME_TXT = { docked: 'Docked', collision: 'Collision', timeout: 'Timed out', fuel: 'Out of fuel', out_of_bounds: 'Lost' };
+  // Canvas colours come from the CSS tokens so the light and dark themes match.
+  const COL = {};
+  const SOURCE_COL = {}, MODE_COL = {}, OUTCOME_COL = {};
+  let GRID = '150,160,175';
+  function readTheme() {
+    const cs = getComputedStyle(document.documentElement);
+    const v = (name) => cs.getPropertyValue(name).trim();
+    Object.assign(COL, {
+      bg: v('--scene'), surface: v('--surface'), text: v('--text'), muted: v('--muted'), faint: v('--faint'), line: v('--border'),
+      accent: v('--accent'), amber: v('--amber'), orange: v('--orange'), violet: v('--violet'), green: v('--green'), red: v('--red'),
+    });
+    GRID = v('--grid') || GRID;
+    Object.assign(SOURCE_COL, { none: COL.faint, primary: COL.accent, backup: COL.amber, brake: COL.orange, veto: COL.violet, hold: COL.violet });
+    Object.assign(MODE_COL, { off: COL.red, v1: COL.violet, v2: COL.accent });
+    Object.assign(OUTCOME_COL, { docked: COL.green, collision: COL.red, timeout: COL.faint, fuel: COL.orange, out_of_bounds: COL.violet });
+  }
+  readTheme();
+  const OUTCOME_TXT = { docked: 'Docked', collision: 'Collision', timeout: 'Timed out', fuel: 'Out of fuel', out_of_bounds: 'Out of bounds' };
   const rgba = (hex, a) => {
     const n = parseInt(hex.slice(1), 16);
     return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
   };
+  const grid = (a) => `rgba(${GRID},${a})`;
+  const SANS = getComputedStyle(document.documentElement).getPropertyValue('--sans').trim() || 'system-ui, sans-serif';
+  const font = (px, weight = 400) => `${weight} ${px}px ${SANS}`;
 
   // ---------------------------------------------------------- catalogue
   const PILOTS = {
-    glideslope: { label: 'Glideslope', short: 'GLIDESLOPE', desc: 'Certified guidance: velocity matching on an exponential glideslope, natural CW drift cancelled in feed-forward.' },
-    ppo: { label: 'PPO', short: 'PPO POLICY', desc: `The shipped reinforcement-learning checkpoint (${POLICY.source}), running in this page as a 10→64→64→3 network.` },
-    hot: { label: 'Reckless', short: 'RECKLESS LAW', desc: 'Adversarial pilot: full thrust straight at the station, never brakes. Exists to break the safety layer.' },
-    manual: { label: 'You', short: 'MANUAL', desc: 'You fly with W/S, A/D, Q/E. Try ramming the station with v2 on.' },
+    glideslope: { label: 'Glideslope', name: 'Glideslope', desc: 'Exponential glideslope with CW feed-forward. The v2 filter also uses it as the backup controller.' },
+    ppo: { label: 'PPO', name: 'PPO policy', desc: `Shipped PPO checkpoint (${POLICY.source}), a 10-64-64-3 network evaluated in the page.` },
+    hot: { label: 'Direct', name: 'Direct thrust', desc: 'Full thrust along the line of sight to the target, never brakes. A worst case for testing the filters.' },
+    manual: { label: 'Manual', name: 'Manual', desc: 'W/S, A/D and Q/E (or the arrow keys) thrust along R-bar, V-bar and H-bar.' },
   };
   const SAFETY = {
-    off: { label: 'Off', desc: 'No protection. Every command reaches the thrusters.' },
-    v1: { label: 'v1 veto', desc: 'Legacy interlock: inside 5 m above 0.2 m/s it zeroes thrust unless the command brakes. A veto is not a brake.' },
-    v2: { label: 'v2 RTA', desc: 'Predictive Simplex filter: the pilot flies while the next step stays inside the envelope; otherwise the certified backup does.' },
+    off: { label: 'Off', desc: 'Commands go straight to the thrusters.' },
+    v1: { label: 'v1 veto', desc: 'Inside 5 m and above 0.2 m/s, any command that does not reduce speed is replaced by zero thrust.' },
+    v2: { label: 'v2 filter', desc: 'Predicts each step against a range-dependent closing-speed limit. Steps over the limit are flown by the glideslope or a brake.' },
   };
   const FAULTS = [
-    { key: 'stuck', label: 'Stuck V-bar thruster', sub: 'jammed at 60% along-track', set: (f) => { f.stuckAxis = 1; f.stuckValue = 0.6; } },
-    { key: 'bias', label: 'Thrust bias', sub: '+5% radial, −3% along-track', set: (f) => { f.bias = [0.05, -0.03, 0]; } },
-    { key: 'dropout', label: 'Command dropout', sub: '20% of commands lost', set: (f) => { f.dropoutProb = 0.2; } },
-    { key: 'freeze', label: 'Sensor freeze', sub: '20% of observations stale', set: (f) => { f.sensorFreezeProb = 0.2; } },
+    { key: 'stuck', label: 'Stuck V-bar thruster', sub: 'held at +0.6', set: (f) => { f.stuckAxis = 1; f.stuckValue = 0.6; } },
+    { key: 'bias', label: 'Thrust bias', sub: '+0.05 R-bar, −0.03 V-bar', set: (f) => { f.bias = [0.05, -0.03, 0]; } },
+    { key: 'dropout', label: 'Command dropout', sub: '20% of steps get zero thrust', set: (f) => { f.dropoutProb = 0.2; } },
+    { key: 'freeze', label: 'Sensor freeze', sub: '20% of readings are stale', set: (f) => { f.sensorFreezeProb = 0.2; } },
     { key: 'leak', label: 'Fuel leak', sub: '0.05% of the tank per second', set: (f) => { f.fuelLeakRate = 0.0005; } },
   ];
   const SCENARIOS = [
-    { key: 'nominal', title: 'Nominal approach', sub: '14 m 3-D offset, certified law docks', pilot: 'glideslope', safety: 'v2', pos: [12, -7, 3.5] },
-    { key: 'learned', title: 'Learned pilot', sub: 'The shipped PPO policy flies a long offset', pilot: 'ppo', safety: 'v2', pos: [-14, 11, 6], vel: [0.003, 0, -0.002] },
-    { key: 'slam', title: 'Reckless slam', sub: 'Full thrust at the station from 6 m', pilot: 'hot', safety: 'v2', pos: [6, 0, 0] },
-    { key: 'oblique', title: 'Oblique slam', sub: 'Reckless law from below and behind', pilot: 'hot', safety: 'v2', pos: [3, -8, 2] },
-    { key: 'fumes', title: 'Running on fumes', sub: '7% fuel, a leak and a reckless pilot', pilot: 'hot', safety: 'v2', pos: [7, -2, 1], fuel: 0.07, faults: ['leak'] },
-    { key: 'stuck', title: 'Stuck thruster', sub: 'A failure the filter cannot command around', pilot: 'hot', safety: 'v2', pos: [8, 4, 0], faults: ['stuck'] },
-    { key: 'manual', title: 'Take the stick', sub: 'You fly; the filter keeps you honest', pilot: 'manual', safety: 'v2', pos: [9, -12, 0] },
+    { key: 'nominal', title: 'Glideslope approach', sub: 'Glideslope pilot from (12, −7, 3.5) m.', pilot: 'glideslope', safety: 'v2', pos: [12, -7, 3.5] },
+    { key: 'ppo', title: 'PPO approach', sub: 'PPO policy from (−14, 11, 6) m with a small initial drift.', pilot: 'ppo', safety: 'v2', pos: [-14, 11, 6], vel: [0.003, 0, -0.002] },
+    { key: 'direct', title: 'Direct thrust, R-bar', sub: 'Full thrust at the target from 6 m on R-bar.', pilot: 'hot', safety: 'v2', pos: [6, 0, 0] },
+    { key: 'oblique', title: 'Direct thrust, oblique', sub: 'Full thrust at the target from (3, −8, 2) m.', pilot: 'hot', safety: 'v2', pos: [3, -8, 2] },
+    { key: 'low-fuel', title: 'Low fuel with leak', sub: '7% fuel, a 0.05%/s leak and the direct-thrust pilot.', pilot: 'hot', safety: 'v2', pos: [7, -2, 1], fuel: 0.07, faults: ['leak'] },
+    { key: 'stuck', title: 'Stuck thruster', sub: 'V-bar thruster held at +0.6 with the direct-thrust pilot.', pilot: 'hot', safety: 'v2', pos: [8, 4, 0], faults: ['stuck'] },
+    { key: 'manual', title: 'Manual', sub: 'Fly it yourself from (9, −12, 0) m.', pilot: 'manual', safety: 'v2', pos: [9, -12, 0] },
   ];
+  // Scenario ids used in earlier links.
+  const SCENARIO_ALIASES = { learned: 'ppo', slam: 'direct', fumes: 'low-fuel' };
   const SPEEDS = [5, 15, 40, 100];
   const VIEWS = { '3d': { yaw: -0.62, pitch: 0.42 }, plane: { yaw: 0, pitch: 0 }, side: { yaw: Math.PI / 2, pitch: 0 } };
 
@@ -113,7 +128,7 @@
     if (st.tab === 'compare') st.runs = ['off', 'v1', 'v2'].map((m) => makeRun(m, SAFETY[m].label));
     else st.runs = [makeRun(st.safety, PILOTS[st.pilot].label)];
     if (!keepCamera) st.cam.auto = true;
-    logEvent(0, '', 'Ready', `${PILOTS[st.pilot].label} pilot · ${st.tab === 'compare' ? 'all three safety layers' : SAFETY[st.safety].label} · ${fmtLen(norm(st.start.pos))} out`);
+    logEvent(0, '', 'Ready', `${PILOTS[st.pilot].name}, ${st.tab === 'compare' ? 'all three filters' : SAFETY[st.safety].label}, ${fmtLen(norm(st.start.pos))} from the target.`);
     hideBanner();
     syncControls();
     st.dirty = true;
@@ -156,11 +171,11 @@
     const env = run.env, t = env.t;
     if (source !== run.lastSource && source !== 'none') {
       if (source !== 'primary' && t - run.lastLogT > 4) {
-        const titles = { backup: 'RTA took the stick', brake: 'Envelope brake engaged', veto: 'Interlock veto, thrust zeroed', hold: 'Emergency hold' };
-        logEvent(t, source === 'veto' || source === 'hold' ? 'violet' : 'amber', titles[source], r.reason);
+        const a = authorityText(source, r.reason);
+        logEvent(t, source === 'veto' || source === 'hold' ? 'violet' : 'amber', a.who, a.why);
         run.lastLogT = t;
       } else if (source === 'primary' && run.lastSource !== 'none' && t - run.lastLogT > 4) {
-        logEvent(t, '', 'Pilot authority restored', 'Predicted step back inside the envelope.');
+        logEvent(t, '', 'Pilot in control again', 'Predicted step is within the limit.');
         run.lastLogT = t;
       }
       run.lastSource = source;
@@ -168,11 +183,12 @@
     if (!run.enteredKeepOut && env.dist < C.safeDist) {
       run.enteredKeepOut = true;
       const cl = S.closingSpeed(env.pos, env.vel);
-      logEvent(t, cl > C.maxSafeClosing ? 'red' : '', 'Entered keep-out sphere', `Closing at ${cl.toFixed(3)} m/s (gate 0.200 m/s).`);
+      logEvent(t, cl > C.maxSafeClosing ? 'red' : '', 'Inside 5 m', `Closing at ${cl.toFixed(3)} m/s (limit 0.200 m/s).`);
     }
     if (!run.floorLogged && env.fuel < C.fuelFloor) {
       run.floorLogged = true;
-      logEvent(t, 'amber', 'Fuel below 5% floor', 'Discretionary thrust stops; collision avoidance does not.');
+      const why = { v2: 'The filter now only spends fuel on braking.', v1: 'The interlock now blocks all thrust.', off: 'No filter, so the pilot keeps thrusting.' };
+      logEvent(t, 'amber', 'Fuel below 5%', why[run.env.safety]);
     }
     if (env.done) {
       const tone = env.outcome === 'docked' ? 'green' : env.outcome === 'collision' ? 'red' : 'amber';
@@ -182,7 +198,20 @@
 
   function outcomeLine(env) {
     const f = env.outcome === 'collision' ? ` at ${env.speed.toFixed(2)} m/s` : '';
-    return `T+${env.t.toFixed(0)} s${f} · Δv ${env.dv.toFixed(2)} m/s · ${env.overrides} interventions`;
+    return `t = ${env.t.toFixed(0)} s${f}, Δv ${env.dv.toFixed(2)} m/s, ${env.overrides} interventions`;
+  }
+
+  // What the overlay and the event log say about who is flying.
+  function authorityText(source, reason) {
+    if (source === 'backup') return { who: 'Backup in control', why: 'The pilot command would exceed the closing-speed limit; the glideslope flies this step.' };
+    if (source === 'brake') {
+      return /fuel/i.test(reason || '')
+        ? { who: 'Brake', why: 'Fuel is below 5% and the craft is on a collision course.' }
+        : { who: 'Brake', why: 'Closing speed is far over the limit; braking.' };
+    }
+    if (source === 'veto') return { who: 'Thrust vetoed', why: 'Inside 5 m above 0.2 m/s and the command does not reduce speed.' };
+    if (source === 'hold') return { who: 'Hold', why: 'Fuel is below 5%; thrust stopped.' };
+    return { who: `${PILOTS[st.pilot].name} in control`, why: st.safety === 'off' ? 'No filter.' : 'Predicted step is within the limit.' };
   }
 
   // ---------------------------------------------------------- formatting
@@ -198,8 +227,7 @@
     if (m >= 1) return [m.toFixed(2), 'm'];
     return [(m * 100).toFixed(1), 'cm'];
   }
-  const fmtT = (t) => `T+${String(Math.round(t)).padStart(3, '0')} s`;
-  const fmtMet = (t) => `MET ${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+  const fmtT = (t) => `t = ${Math.round(t)} s`;
   function niceStep(raw) {
     const p = Math.pow(10, Math.floor(Math.log10(raw)));
     const f = raw / p;
@@ -220,7 +248,6 @@
       cv.width = Math.round(rec.w * rec.dpr);
       cv.height = Math.round(rec.h * rec.dpr);
       st.dirty = true;
-      if (id === 'scene') rec.stars = null;
     };
     new ResizeObserver(fit).observe(cv);
     fit();
@@ -273,7 +300,7 @@
       ctx.closePath();
       ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
       ctx.fill();
-      ctx.strokeStyle = `rgba(255,255,255,${0.12 * alpha})`;
+      ctx.strokeStyle = grid(0.3 * alpha);
       ctx.lineWidth = 0.6;
       ctx.stroke();
     }
@@ -287,23 +314,6 @@
       const q = P(p);
       i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]);
     }
-  }
-
-  function stars(rec) {
-    if (rec.stars) return rec.stars;
-    const off = document.createElement('canvas');
-    off.width = rec.cv.width; off.height = rec.cv.height;
-    const c = off.getContext('2d');
-    const rng = S.mulberry32(42);
-    const count = Math.round((rec.w * rec.h) / 2600);
-    for (let i = 0; i < count; i++) {
-      const x = rng() * off.width, y = rng() * off.height, m = rng();
-      c.fillStyle = `rgba(200,220,255,${0.08 + m * m * 0.55})`;
-      const r = (m > 0.96 ? 1.3 : 0.7) * rec.dpr;
-      c.fillRect(x, y, r, r);
-    }
-    rec.stars = off;
-    return off;
   }
 
   function coastFrom(pos, vel, horizon = 240, every = 2) {
@@ -351,11 +361,7 @@
     const P = projector(st.cam, w, h);
     const s = P.s;
 
-    // backdrop
-    const bg = ctx.createRadialGradient(w * 0.5, h * 0.45, 0, w * 0.5, h * 0.45, Math.max(w, h) * 0.75);
-    bg.addColorStop(0, '#0a1424'); bg.addColorStop(1, '#03060b');
-    ctx.fillStyle = bg; ctx.fillRect(0, 0, w, h);
-    ctx.drawImage(stars(rec), 0, 0, w, h);
+    ctx.fillStyle = COL.bg; ctx.fillRect(0, 0, w, h);
 
     // reference grids: orbit-plane wall and V/H floor, faded by viewing angle
     const step = niceStep(st.cam.zoom / 3.2);
@@ -363,12 +369,12 @@
     const floorA = clamp(Math.abs(Math.sin(st.cam.pitch)) * 2.2, 0, 1);
     const wallA = clamp(Math.cos(st.cam.pitch) * Math.abs(Math.cos(st.cam.yaw)) - floorA * 0.55, 0, 1);
     const sideA = clamp(Math.cos(st.cam.pitch) * Math.abs(Math.sin(st.cam.yaw)) - floorA * 0.55, 0, 1);
-    const grid = (alpha, mk) => {
+    const drawGrid = (alpha, mk) => {
       if (alpha <= 0.02) return;
       for (let g = -ext; g <= ext + 1e-9; g += step) {
         const major = Math.abs(g) < 1e-9;
         const fade = 1 - Math.abs(g) / (ext + step);
-        ctx.strokeStyle = major ? `rgba(120,170,230,${0.32 * alpha})` : `rgba(110,150,200,${0.11 * alpha * fade})`;
+        ctx.strokeStyle = major ? grid(0.38 * alpha) : grid(0.13 * alpha * fade);
         ctx.lineWidth = major ? 1 : 0.8;
         for (const [a, b] of mk(g)) {
           const p = P(a), q = P(b);
@@ -376,58 +382,56 @@
         }
       }
     };
-    grid(floorA, (g) => [[[0, g, -ext], [0, g, ext]], [[0, -ext, g], [0, ext, g]]]);
-    grid(wallA, (g) => [[[g, -ext, 0], [g, ext, 0]], [[-ext, g, 0], [ext, g, 0]]]);
-    grid(sideA, (g) => [[[g, 0, -ext], [g, 0, ext]], [[-ext, 0, g], [ext, 0, g]]]);
+    drawGrid(floorA, (g) => [[[0, g, -ext], [0, g, ext]], [[0, -ext, g], [0, ext, g]]]);
+    drawGrid(wallA, (g) => [[[g, -ext, 0], [g, ext, 0]], [[-ext, g, 0], [ext, g, 0]]]);
+    drawGrid(sideA, (g) => [[[g, 0, -ext], [g, 0, ext]], [[-ext, 0, g], [ext, 0, g]]]);
 
     // axis labels on the grid
-    ctx.font = '600 10px Inter, system-ui, sans-serif';
-    ctx.fillStyle = 'rgba(140,170,210,0.55)';
+    ctx.font = font(11);
+    ctx.fillStyle = grid(0.85);
     const lab = (p, t) => { const q = P(p); if (q[0] > 8 && q[0] < w - 60 && q[1] > 16 && q[1] < h - 8) ctx.fillText(t, q[0] + 4, q[1] - 4); };
     lab([0, ext * 0.92, 0], '+V-bar');
-    lab([ext * 0.85, 0, 0], '+R-bar · zenith');
+    lab([ext * 0.85, 0, 0], '+R-bar (zenith)');
     if (floorA > 0.3 || sideA > 0.3) lab([0, 0, ext * 0.9], '+H-bar');
 
     const origin = P([0, 0, 0]);
 
     // keep-out sphere
     const ko = C.safeDist * s;
-    const kg = ctx.createRadialGradient(origin[0] - ko * 0.3, origin[1] - ko * 0.35, ko * 0.1, origin[0], origin[1], ko);
-    kg.addColorStop(0, 'rgba(255,181,71,0.07)'); kg.addColorStop(0.85, 'rgba(255,181,71,0.035)'); kg.addColorStop(1, 'rgba(255,181,71,0.12)');
-    ctx.fillStyle = kg;
+    ctx.fillStyle = rgba(COL.amber, 0.05);
     ctx.beginPath(); ctx.arc(origin[0], origin[1], ko, 0, Math.PI * 2); ctx.fill();
-    ctx.setLineDash([5, 6]); ctx.strokeStyle = 'rgba(255,181,71,0.55)'; ctx.lineWidth = 1.1; ctx.stroke(); ctx.setLineDash([]);
-    ctx.strokeStyle = 'rgba(255,181,71,0.16)'; ctx.lineWidth = 1;
+    ctx.setLineDash([5, 5]); ctx.strokeStyle = rgba(COL.amber, 0.7); ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]);
+    ctx.strokeStyle = rgba(COL.amber, 0.22); ctx.lineWidth = 1;
     ring(ctx, P, C.safeDist, 'VH'); ctx.stroke();
     ring(ctx, P, C.safeDist, 'RV'); ctx.stroke();
-    ctx.fillStyle = 'rgba(255,181,71,0.8)';
-    ctx.font = '600 10px Inter, system-ui, sans-serif';
-    ctx.fillText('KEEP-OUT 5 m', origin[0] + ko * 0.72 + 6, origin[1] - ko * 0.72);
+    ctx.fillStyle = COL.amber;
+    ctx.font = font(11);
+    ctx.fillText('5 m keep-out', origin[0] + ko * 0.72 + 6, origin[1] - ko * 0.72);
 
     // capture sphere
     const cr = C.captureRadius * s;
     ctx.beginPath(); ctx.arc(origin[0], origin[1], cr, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(63,221,155,0.08)'; ctx.fill();
-    ctx.strokeStyle = 'rgba(63,221,155,0.75)'; ctx.lineWidth = 1.1; ctx.stroke();
+    ctx.fillStyle = rgba(COL.green, 0.1); ctx.fill();
+    ctx.strokeStyle = COL.green; ctx.lineWidth = 1; ctx.stroke();
 
     const cursor = st.cursor;
     const mainRun = st.runs[0];
 
-    // coast prediction ("if the thrusters died now")
+    // coast arc: where the craft goes if thrust stops now
     const coastRuns = st.tab === 'fly' ? [mainRun] : [];
     for (const run of coastRuns) {
       const f = frameAt(run, cursor);
       if (run.env.done && cursor == null) continue;
       const { pts, impact } = coastFrom(f.pos, f.vel, 240);
       ctx.setLineDash([2, 5]);
-      ctx.strokeStyle = impact && impact.speed >= C.maxDockSpeed ? 'rgba(255,91,110,0.55)' : 'rgba(220,230,245,0.28)';
+      ctx.strokeStyle = impact && impact.speed >= C.maxDockSpeed ? rgba(COL.red, 0.7) : rgba(COL.text, 0.3);
       ctx.lineWidth = 1.2;
       ctx.beginPath();
       pts.forEach((p, i) => { const q = P(p); i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]); });
       ctx.stroke(); ctx.setLineDash([]);
       if (impact && impact.speed >= C.maxDockSpeed) {
         const q = P(pts[pts.length - 1]);
-        ctx.strokeStyle = 'rgba(255,91,110,0.8)'; ctx.lineWidth = 1.5;
+        ctx.strokeStyle = COL.red; ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.moveTo(q[0] - 4, q[1] - 4); ctx.lineTo(q[0] + 4, q[1] + 4); ctx.moveTo(q[0] + 4, q[1] - 4); ctx.lineTo(q[0] - 4, q[1] + 4); ctx.stroke();
       }
     }
@@ -436,33 +440,31 @@
     const trailColor = (run, fr) => {
       if (st.tab === 'compare') return MODE_COL[run.safety];
       if (fr.closing > fr.limit + 1e-9) return COL.red;
-      return SOURCE_COL[fr.source] || COL.cyan;
+      return SOURCE_COL[fr.source] || COL.accent;
     };
     for (const run of st.runs) {
       const end = cursor == null ? run.frames.length - 1 : Math.min(cursor, run.frames.length - 1);
       const fr = run.frames;
       if (floorA > 0.25) {
-        ctx.strokeStyle = `rgba(120,160,210,${0.16 * floorA})`; ctx.lineWidth = 1;
+        ctx.strokeStyle = grid(0.25 * floorA); ctx.lineWidth = 1;
         ctx.beginPath();
         for (let i = 0; i <= end; i++) { const q = P([0, fr[i].pos[1], fr[i].pos[2]]); i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]); }
         ctx.stroke();
       }
-      for (const pass of [0, 1]) {
-        ctx.lineWidth = pass ? 2 : 6;
-        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-        let i = 1;
-        while (i <= end) {
-          const col = trailColor(run, fr[i]);
-          ctx.strokeStyle = pass ? col : rgba(col, 0.13);
-          ctx.beginPath();
-          const q0 = P(fr[i - 1].pos); ctx.moveTo(q0[0], q0[1]);
-          while (i <= end && trailColor(run, fr[i]) === col) { const q = P(fr[i].pos); ctx.lineTo(q[0], q[1]); i++; }
-          ctx.stroke();
-        }
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      let i = 1;
+      while (i <= end) {
+        const col = trailColor(run, fr[i]);
+        ctx.strokeStyle = col;
+        ctx.beginPath();
+        const q0 = P(fr[i - 1].pos); ctx.moveTo(q0[0], q0[1]);
+        while (i <= end && trailColor(run, fr[i]) === col) { const q = P(fr[i].pos); ctx.lineTo(q[0], q[1]); i++; }
+        ctx.stroke();
       }
       // start marker
       const s0 = P(fr[0].pos);
-      ctx.strokeStyle = 'rgba(232,238,247,0.5)'; ctx.lineWidth = 1.2;
+      ctx.strokeStyle = rgba(COL.text, 0.55); ctx.lineWidth = 1.2;
       ctx.beginPath(); ctx.arc(s0[0], s0[1], 4.5, 0, Math.PI * 2); ctx.stroke();
     }
 
@@ -487,9 +489,9 @@
       // drop line
       if (floorA > 0.25) {
         const fl = P([0, f.pos[1], f.pos[2]]);
-        ctx.setLineDash([2, 3]); ctx.strokeStyle = `rgba(160,190,230,${0.35 * floorA})`; ctx.lineWidth = 1;
+        ctx.setLineDash([2, 3]); ctx.strokeStyle = grid(0.5 * floorA); ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(q[0], q[1]); ctx.lineTo(fl[0], fl[1]); ctx.stroke(); ctx.setLineDash([]);
-        ctx.beginPath(); ctx.ellipse(fl[0], fl[1], 4, 2, 0, 0, Math.PI * 2); ctx.strokeStyle = `rgba(160,190,230,${0.4 * floorA})`; ctx.stroke();
+        ctx.beginPath(); ctx.ellipse(fl[0], fl[1], 4, 2, 0, 0, Math.PI * 2); ctx.strokeStyle = grid(0.55 * floorA); ctx.stroke();
       }
       // plume opposite to the executed acceleration
       const ex = f.executed, em = norm(ex);
@@ -501,15 +503,11 @@
         ctx.strokeStyle = g; ctx.lineWidth = 5; ctx.lineCap = 'round';
         ctx.beginPath(); ctx.moveTo(q[0], q[1]); ctx.lineTo(tail[0], tail[1]); ctx.stroke();
       }
-      // glow + body
-      const glow = ctx.createRadialGradient(q[0], q[1], 0, q[0], q[1], 16);
-      glow.addColorStop(0, rgba(col, 0.45)); glow.addColorStop(1, rgba(col, 0));
-      ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(q[0], q[1], 16, 0, Math.PI * 2); ctx.fill();
       const bodyHalf = Math.max(0.17, 3.2 / s);
-      drawBox(ctx, P, f.pos, [bodyHalf, bodyHalf * 1.25, bodyHalf], st.tab === 'compare' ? col : '#bfeeff');
+      drawBox(ctx, P, f.pos, [bodyHalf, bodyHalf * 1.25, bodyHalf], st.tab === 'compare' ? col : COL.text);
       // label
-      ctx.font = '500 11px "JetBrains Mono", ui-monospace, monospace';
-      const label = st.tab === 'compare' ? `${run.label} · ${fmtLen(f.dist)}` : `${fmtLen(f.dist)} · ${f.speed.toFixed(3)} m/s`;
+      ctx.font = font(12);
+      const label = st.tab === 'compare' ? `${run.label}: ${fmtLen(f.dist)}` : `${fmtLen(f.dist)}, ${f.speed.toFixed(3)} m/s`;
       const tw = ctx.measureText(label).width;
       const lx = clamp(q[0] + 14, 6, w - tw - 16);
       let ly = clamp(q[1] - 14, 18, h - 8);
@@ -520,51 +518,33 @@
       }
       placed.push({ x: lx, y: ly, w: tw });
       if (Math.abs(ly - (q[1] - 14)) > 4) {
-        ctx.strokeStyle = 'rgba(232,238,247,0.25)'; ctx.lineWidth = 1;
+        ctx.strokeStyle = rgba(COL.text, 0.3); ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(q[0] + 4, q[1] - 2); ctx.lineTo(lx - 6, ly - 4); ctx.stroke();
       }
-      ctx.fillStyle = 'rgba(4,7,13,0.72)';
-      ctx.beginPath(); ctx.roundRect(lx - 6, ly - 13, tw + 12, 19, 6); ctx.fill();
+      ctx.fillStyle = rgba(COL.surface, 0.88);
+      ctx.beginPath(); ctx.roundRect(lx - 6, ly - 14, tw + 12, 20, 4); ctx.fill();
       ctx.fillStyle = st.tab === 'compare' ? col : COL.text;
       ctx.fillText(label, lx, ly);
     }
 
-    // outcome effects
-    if (st.doneAt && st.cursor == null && st.tab === 'fly') {
-      const age = (performance.now() - st.doneAt) / 1000;
-      const out = mainRun.env.outcome;
-      if (age < 2.4 && (out === 'docked' || out === 'collision')) {
-        const col = out === 'docked' ? COL.green : COL.red;
-        const at = out === 'docked' ? origin : P(mainRun.env.pos);
-        for (let k = 0; k < 3; k++) {
-          const a = age - k * 0.25;
-          if (a <= 0) continue;
-          ctx.strokeStyle = rgba(col, Math.max(0, 0.7 * (1 - a / 1.6)));
-          ctx.lineWidth = 2;
-          ctx.beginPath(); ctx.arc(at[0], at[1], 8 + a * 70, 0, Math.PI * 2); ctx.stroke();
-        }
-        st.dirty = true;
-      }
-    }
-
     // axis triad + scale bar
     const tx = 44, ty = h - 46;
-    const tri = [['R', [1, 0, 0], COL.red], ['V', [0, 1, 0], COL.green], ['H', [0, 0, 1], COL.cyan]];
-    ctx.font = '600 10px Inter, system-ui, sans-serif';
+    const tri = [['R', [1, 0, 0], COL.red], ['V', [0, 1, 0], COL.green], ['H', [0, 0, 1], COL.accent]];
+    ctx.font = font(11, 600);
     for (const [name, v, col] of tri) {
       const r = P.rot(v);
       const ex2 = tx + r[0] * 22, ey2 = ty - r[1] * 22;
-      ctx.strokeStyle = rgba(col, 0.85); ctx.lineWidth = 1.6;
+      ctx.strokeStyle = col; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(ex2, ey2); ctx.stroke();
       ctx.fillStyle = col; ctx.fillText(name, ex2 + (r[0] >= 0 ? 3 : -10), ey2 + (r[1] >= 0 ? -2 : 10));
     }
     const target = st.cam.zoom * 0.5;
     const bar = niceStep(target);
     const bw = bar * s;
-    ctx.strokeStyle = 'rgba(232,238,247,0.7)'; ctx.lineWidth = 1.5;
+    ctx.strokeStyle = rgba(COL.text, 0.7); ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(w - 20 - bw, h - 22); ctx.lineTo(w - 20, h - 22);
     ctx.moveTo(w - 20 - bw, h - 26); ctx.lineTo(w - 20 - bw, h - 18); ctx.moveTo(w - 20, h - 26); ctx.lineTo(w - 20, h - 18); ctx.stroke();
-    ctx.fillStyle = COL.muted; ctx.font = '500 10.5px "JetBrains Mono", ui-monospace, monospace';
+    ctx.fillStyle = COL.muted; ctx.font = font(11);
     const bl = fmtLen(bar);
     ctx.fillText(bl, w - 20 - bw / 2 - ctx.measureText(bl).width / 2, h - 30);
   }
@@ -585,7 +565,7 @@
     return { L, R, T, B, pw, ph, lx, ly, xmax, ymin, ymax };
   }
 
-  function axesText(ctx) { ctx.font = '500 10px "JetBrains Mono", ui-monospace, monospace'; ctx.fillStyle = COL.faint; }
+  function axesText(ctx) { ctx.font = font(11); ctx.fillStyle = COL.faint; }
 
   function drawPhase() {
     const rec = canvases.phase, ctx = begin(rec);
@@ -605,7 +585,7 @@
     for (let v = 0; v <= sc.ymax + 1e-9; v += ystep) yticks.push(+v.toFixed(2));
     for (const v of yticks) {
       const y = ly(v);
-      ctx.strokeStyle = Math.abs(v) < 1e-9 ? 'rgba(160,190,230,0.3)' : COL.line;
+      ctx.strokeStyle = Math.abs(v) < 1e-9 ? grid(0.45) : COL.line;
       ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke();
       ctx.fillText(v.toFixed(1), 8, y + 3);
     }
@@ -617,27 +597,23 @@
     for (let i = 0; i <= N; i++) ctx.lineTo(lx(envD(i)), ly(S.closingLimit(envD(i), C)));
     ctx.lineTo(lx(sc.xmax), ly(sc.ymax));
     ctx.closePath();
-    ctx.fillStyle = 'rgba(255,91,110,0.10)'; ctx.fill();
-    ctx.save(); ctx.clip();
-    ctx.strokeStyle = 'rgba(255,91,110,0.10)'; ctx.lineWidth = 1;
-    for (let x = L - ph; x < L + pw; x += 7) { ctx.beginPath(); ctx.moveTo(x, T + ph); ctx.lineTo(x + ph, T); ctx.stroke(); }
-    ctx.restore();
-    ctx.strokeStyle = 'rgba(255,91,110,0.85)'; ctx.lineWidth = 1.5;
+    ctx.fillStyle = rgba(COL.red, 0.08); ctx.fill();
+    ctx.strokeStyle = COL.red; ctx.lineWidth = 1.5;
     ctx.beginPath();
     for (let i = 0; i <= N; i++) { const x = lx(envD(i)), y = ly(S.closingLimit(envD(i), C)); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
     ctx.stroke();
-    ctx.setLineDash([2, 4]); ctx.strokeStyle = 'rgba(255,181,71,0.35)';
+    ctx.setLineDash([3, 4]); ctx.strokeStyle = COL.faint; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(lx(PH.xmin), ly(C.maxSafeClosing)); ctx.lineTo(lx(sc.xmax), ly(C.maxSafeClosing)); ctx.stroke();
     ctx.setLineDash([]);
     // keep-out edge and capture box
-    ctx.strokeStyle = 'rgba(255,181,71,0.45)'; ctx.setLineDash([3, 4]);
+    ctx.strokeStyle = rgba(COL.amber, 0.6); ctx.setLineDash([3, 4]);
     ctx.beginPath(); ctx.moveTo(lx(C.safeDist), T); ctx.lineTo(lx(C.safeDist), T + ph); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle = 'rgba(63,221,155,0.13)';
+    ctx.fillStyle = rgba(COL.green, 0.14);
     ctx.fillRect(lx(PH.xmin), ly(C.maxDockSpeed), lx(C.dockDist) - lx(PH.xmin), ly(sc.ymin) - ly(C.maxDockSpeed));
-    ctx.font = '600 9.5px Inter, system-ui, sans-serif';
-    ctx.fillStyle = 'rgba(63,221,155,0.9)'; ctx.fillText('CAPTURE', lx(PH.xmin) + 4, ly(C.maxDockSpeed) + 12);
-    ctx.fillStyle = 'rgba(255,181,71,0.85)'; ctx.fillText('KEEP-OUT', lx(C.safeDist) + 4, T + 12);
-    ctx.fillStyle = 'rgba(255,91,110,0.9)'; ctx.fillText('FORBIDDEN', lx(0.9), T + 12);
+    ctx.font = font(11);
+    ctx.fillStyle = COL.green; ctx.fillText('capture', lx(PH.xmin) + 4, ly(sc.ymin) - 5);
+    ctx.fillStyle = COL.amber; ctx.fillText('5 m', lx(C.safeDist) + 4, T + 12);
+    ctx.fillStyle = COL.red; ctx.fillText('over limit', lx(0.9), T + 12);
     // trajectories
     const cursor = cursorIndex();
     for (const run of st.runs) {
@@ -657,8 +633,7 @@
       }
       const f = fr[end];
       const col = st.tab === 'compare' ? MODE_COL[run.safety] : COL.text;
-      ctx.fillStyle = rgba(col, 0.25); ctx.beginPath(); ctx.arc(lx(f.dist), ly(f.closing), 8, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(lx(f.dist), ly(f.closing), 3.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(lx(f.dist), ly(f.closing), 3.5, 0, Math.PI * 2); ctx.fill();
     }
     axesText(ctx);
     ctx.fillText('m/s', 8, T - 9);
@@ -690,8 +665,8 @@
     for (let v = 0; v <= vmax + 1e-9; v += vmax > 1 ? 0.5 : 0.1) ctx.fillText(v.toFixed(1), L + pw + 6, vy(v) + 3);
     // thresholds
     ctx.setLineDash([3, 4]);
-    ctx.strokeStyle = 'rgba(255,181,71,0.5)'; ctx.beginPath(); ctx.moveTo(L, ly(C.safeDist)); ctx.lineTo(L + pw, ly(C.safeDist)); ctx.stroke();
-    ctx.strokeStyle = 'rgba(63,221,155,0.55)'; ctx.beginPath(); ctx.moveTo(L, ly(C.dockDist)); ctx.lineTo(L + pw, ly(C.dockDist)); ctx.stroke();
+    ctx.strokeStyle = rgba(COL.amber, 0.6); ctx.beginPath(); ctx.moveTo(L, ly(C.safeDist)); ctx.lineTo(L + pw, ly(C.safeDist)); ctx.stroke();
+    ctx.strokeStyle = rgba(COL.green, 0.7); ctx.beginPath(); ctx.moveTo(L, ly(C.dockDist)); ctx.lineTo(L + pw, ly(C.dockDist)); ctx.stroke();
     ctx.setLineDash([]);
     const cursor = cursorIndex();
     // event band
@@ -707,7 +682,7 @@
     });
     for (const run of st.runs) {
       const fr = run.frames, end = Math.min(cursor, fr.length - 1);
-      const col = st.tab === 'compare' ? MODE_COL[run.safety] : COL.cyan;
+      const col = st.tab === 'compare' ? MODE_COL[run.safety] : COL.accent;
       ctx.strokeStyle = rgba(col, 0.45); ctx.lineWidth = 1;
       ctx.beginPath();
       for (let i = 0; i <= end; i++) { const x = lx(fr[i].t), y = vy(fr[i].speed); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
@@ -719,7 +694,7 @@
     }
     if (st.cursor != null) {
       const t = frameAt(st.runs[0], st.cursor).t;
-      ctx.strokeStyle = 'rgba(232,238,247,0.5)'; ctx.beginPath(); ctx.moveTo(lx(t), T); ctx.lineTo(lx(t), T + ph); ctx.stroke();
+      ctx.strokeStyle = rgba(COL.text, 0.5); ctx.beginPath(); ctx.moveTo(lx(t), T); ctx.lineTo(lx(t), T + ph); ctx.stroke();
     }
     axesText(ctx);
     ctx.fillText('range m', 6, T - 9);
@@ -734,9 +709,9 @@
     const total = Math.max(run.env.maxSteps, ...st.runs.map((r) => r.frames.length - 1));
     const live = Math.max(...st.runs.map((r) => r.frames.length - 1));
     const x = (i) => 6 + (i / total) * (w - 12);
-    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.fillStyle = grid(0.18);
     ctx.beginPath(); ctx.roundRect(6, h / 2 - 3, w - 12, 6, 3); ctx.fill();
-    ctx.fillStyle = 'rgba(92,212,255,0.35)';
+    ctx.fillStyle = rgba(COL.accent, 0.45);
     ctx.beginPath(); ctx.roundRect(6, h / 2 - 3, Math.max(0, x(live) - 6), 6, 3); ctx.fill();
     st.runs.forEach((r, k) => {
       for (let i = 1; i < r.frames.length; i++) {
@@ -749,7 +724,7 @@
     const cur = cursorIndex();
     ctx.fillStyle = COL.text;
     ctx.beginPath(); ctx.arc(x(cur), h / 2, 6, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = COL.bg; ctx.beginPath(); ctx.arc(x(cur), h / 2, 2.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = COL.surface; ctx.beginPath(); ctx.arc(x(cur), h / 2, 2.5, 0, Math.PI * 2); ctx.fill();
     st.timelineGeom = { total, w };
   }
 
@@ -759,7 +734,7 @@
     const vals = fr.slice(0, end + 1).map((f) => f.value).filter((v) => v != null);
     if (vals.length < 2) return;
     const lo = Math.min(...vals), hi = Math.max(...vals);
-    ctx.strokeStyle = COL.cyan; ctx.lineWidth = 1.4;
+    ctx.strokeStyle = COL.accent; ctx.lineWidth = 1.4;
     ctx.beginPath();
     vals.forEach((v, i) => {
       const x = (i / Math.max(1, st.runs[0].env.maxSteps)) * rec.w;
@@ -778,18 +753,17 @@
       box.appendChild(row);
       axisEls.push({ fill: row.querySelector('.fill'), cmd: row.querySelector('.cmd'), num: row.querySelector('.num') });
     });
-    box.appendChild(el('div', { class: 'legendline' }, `<span><i style="background:${COL.cyan}"></i>applied</span><span><i style="background:${COL.text};opacity:.6;width:2px;height:9px"></i>pilot asked</span>`));
+    box.appendChild(el('div', { class: 'legendline' }, `<span><i style="background:${COL.accent}"></i>applied</span><span><i style="background:${COL.text};opacity:.6;width:2px;height:9px"></i>commanded</span>`));
   }
 
   function phaseName(run, f) {
     const env = run.env;
     if (env.done && (st.cursor == null || st.cursor >= run.frames.length - 1)) {
-      return { text: OUTCOME_TXT[env.outcome].toUpperCase(), kind: env.outcome === 'docked' ? 'docked' : env.outcome === 'collision' ? 'collision' : 'warn' };
+      return { text: OUTCOME_TXT[env.outcome], kind: env.outcome === 'docked' ? 'docked' : env.outcome === 'collision' ? 'collision' : 'warn' };
     }
-    if (run.frames.length === 1 && !st.playing) return { text: 'STANDBY', kind: '' };
-    if (f.dist < 1.5) return { text: 'FINAL APPROACH', kind: '' };
-    if (f.dist < C.safeDist) return { text: 'PROXIMITY OPS', kind: f.closing > f.limit ? 'collision' : 'warn' };
-    return { text: 'APPROACH', kind: '' };
+    if (run.frames.length === 1 && !st.playing) return { text: 'Standby', kind: '' };
+    if (f.dist < C.safeDist) return { text: 'Inside 5 m', kind: f.closing > f.limit ? 'collision' : '' };
+    return { text: 'Approach', kind: '' };
   }
 
   function updateTelemetry() {
@@ -797,7 +771,7 @@
     const f = frameAt(run, st.cursor);
     const ph = phaseName(run, f);
     $('phaseTxt').textContent = ph.text; $('phaseTxt').dataset.kind = ph.kind;
-    $('met').textContent = fmtMet(f.t);
+    $('met').textContent = fmtT(f.t);
     const [rv, ru] = splitLen(f.dist);
     $('range').textContent = rv; $('rangeU').textContent = ru;
     const cl = $('closing');
@@ -809,8 +783,9 @@
     ov.textContent = String(f.overrides);
     ov.className = f.overrides ? 'warn' : '';
     const use = f.closing / Math.max(f.limit, 1e-9);
-    $('envTxt').textContent = f.closing <= 0 ? 'opening range'
+    $('envTxt').textContent = f.closing <= 0 ? 'range opening'
       : `${(use * 100).toFixed(0)}% of ${f.limit.toFixed(3)} m/s`;
+    $('envBar').style.background = use > 1 ? COL.red : use > 0.85 ? COL.amber : COL.green;
     $('envBar').style.width = `${clamp(use, 0, 1.25) / 1.25 * 100}%`;
     $('envBar').parentElement.querySelector('em').style.left = `${100 / 1.25}%`;
     $('fuelTxt').textContent = `${(f.fuel * 100).toFixed(2)}%`;
@@ -830,15 +805,15 @@
     $('criticPanel').hidden = st.pilot !== 'ppo';
     if (st.pilot === 'ppo' && f.value != null) $('criticV').textContent = f.value.toFixed(1);
 
-    // authority banner
+    // who is flying
     const auth = $('authority');
     let who, why, data;
-    if (run.frames.length === 1 && !st.playing) { who = 'READY'; why = 'Press play or space to start the approach.'; data = 'none'; }
-    else if (run.env.done && st.cursor == null) { who = OUTCOME_TXT[run.env.outcome].toUpperCase(); why = outcomeLine(run.env); data = run.env.outcome === 'docked' ? 'primary' : 'brake'; }
-    else if (f.source === 'primary' || f.source === 'none') { who = `${PILOTS[st.pilot].short} FLYING`; why = st.safety === 'off' ? 'No safety layer: every command reaches the thrusters.' : f.reason || 'Predicted step stays inside the envelope.'; data = 'primary'; }
+    if (run.frames.length === 1 && !st.playing) { who = 'Ready'; why = 'Press Play or Space.'; data = 'none'; }
+    else if (run.env.done && st.cursor == null) { who = OUTCOME_TXT[run.env.outcome]; why = outcomeLine(run.env); data = run.env.outcome === 'docked' ? 'docked' : 'failed'; }
     else {
-      const map = { backup: 'RTA BACKUP FLYING', brake: 'ENVELOPE BRAKE', veto: 'VETO · THRUST ZEROED', hold: 'EMERGENCY HOLD' };
-      who = map[f.source]; why = f.reason; data = f.source;
+      const src = f.source === 'none' ? 'primary' : f.source;
+      ({ who, why } = authorityText(src, f.reason));
+      data = src;
     }
     if (f.fault && !(run.env.done && st.cursor == null)) why = `Fault: ${f.fault.replace('_', ' ')}. ` + why;
     $('authWho').textContent = who; $('authWhy').textContent = why; auth.dataset.src = data;
@@ -849,24 +824,24 @@
     st.logDirty = false;
     const box = $('log');
     box.innerHTML = '';
-    if (!st.log.length) { box.appendChild(el('div', { class: 'empty' }, 'No events yet.')); return; }
+    if (!st.log.length) { box.appendChild(el('div', { class: 'empty' }, 'None yet.')); return; }
     for (const e of st.log) {
-      box.appendChild(el('div', { class: 'ev', 'data-tone': e.tone }, `<span class="t">T+${Math.round(e.t)}s</span><div><b>${e.title}</b><br>${e.text}</div>`));
+      box.appendChild(el('div', { class: 'ev', 'data-tone': e.tone }, `<span class="t">${Math.round(e.t)} s</span><div><b>${e.title}</b><br>${e.text}</div>`));
     }
   }
 
   function updateCompare() {
     const auth = $('authority');
     const started = !atStart() || st.playing;
-    $('authWho').textContent = started ? `${PILOTS[st.pilot].short} · 3 LAYERS` : 'READY';
-    $('authWhy').textContent = started ? 'Identical pilot, start and faults; only the safety layer differs.' : 'Press play or space to fly all three safety layers at once.';
+    $('authWho').textContent = started ? `${PILOTS[st.pilot].name}, three filters` : 'Ready';
+    $('authWhy').textContent = started ? 'Same pilot, start and faults.' : 'Press Play or Space to fly all three at once.';
     auth.dataset.src = started ? 'primary' : 'none';
     const box = $('cmpCards');
     if (box.children.length !== st.runs.length) {
       box.innerHTML = '';
       for (const run of st.runs) {
-        const card = el('div', { class: 'panel cmpcard', style: `--c:${MODE_COL[run.safety]}` },
-          `<header><b>${SAFETY[run.safety].label}</b><span style="color:${MODE_COL[run.safety]}"></span></header><p>${SAFETY[run.safety].desc}</p>
+        const card = el('div', { class: 'cmpcard', style: `--c:${MODE_COL[run.safety]}` },
+          `<header><b><i></i>${SAFETY[run.safety].label}</b><span></span></header><p>${SAFETY[run.safety].desc}</p>
            <dl><div><dt>Range</dt><dd data-k="range"></dd></div><div><dt>Speed</dt><dd data-k="speed"></dd></div><div><dt>Interventions</dt><dd data-k="ovr"></dd></div></dl>`);
         box.appendChild(card);
       }
@@ -875,7 +850,7 @@
       const card = box.children[i];
       const f = frameAt(run, st.cursor);
       const done = run.env.done && (st.cursor == null || st.cursor >= run.frames.length - 1);
-      card.querySelector('header span').textContent = done ? OUTCOME_TXT[run.env.outcome] : f.dist < C.safeDist ? 'inside keep-out' : 'approaching';
+      card.querySelector('header span').textContent = done ? OUTCOME_TXT[run.env.outcome] : f.dist < C.safeDist ? 'inside 5 m' : 'approaching';
       card.querySelector('header span').style.color = done ? OUTCOME_COL[run.env.outcome] : COL.muted;
       card.querySelector('[data-k=range]').textContent = fmtLen(f.dist);
       card.querySelector('[data-k=speed]').textContent = f.speed.toFixed(3);
@@ -885,7 +860,7 @@
 
   function showBanner(run) {
     const env = run.env;
-    $('bannerTitle').textContent = OUTCOME_TXT[env.outcome].toUpperCase();
+    $('bannerTitle').textContent = OUTCOME_TXT[env.outcome];
     $('bannerSub').textContent = outcomeLine(env);
     $('banner').dataset.kind = env.outcome;
     $('banner').classList.add('show');
@@ -898,7 +873,7 @@
   function buildControls() {
     const sc = $('scenarios');
     for (const s of SCENARIOS) {
-      const b = el('button', { class: 'scenario', 'data-key': s.key, 'aria-pressed': 'false', title: s.sub }, `<b>${s.title}</b>`);
+      const b = el('button', { class: 'scenario', 'data-key': s.key, 'aria-pressed': 'false', title: s.sub }, s.title);
       b.onclick = () => loadScenario(s.key);
       sc.appendChild(b);
     }
@@ -945,7 +920,7 @@
     document.querySelectorAll('#views button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === st.view)));
     document.querySelectorAll('.tab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === st.tab)));
     const scn = SCENARIOS.find((x) => x.key === st.scenario);
-    $('scenarioDesc').textContent = scn ? scn.sub : 'Custom setup.';
+    $('scenarioDesc').textContent = scn ? scn.sub : 'Custom start.';
     $('pilotDesc').textContent = PILOTS[st.pilot].desc;
     $('safetyDesc').textContent = SAFETY[st.safety].desc;
     $('sx').value = +st.start.pos[0].toFixed(2); $('sy').value = +st.start.pos[1].toFixed(2); $('sz').value = +st.start.pos[2].toFixed(2);
@@ -974,7 +949,7 @@
     st.pilot = k;
     st.scenario = null;
     if (k === 'manual') st.speed = 5;
-    if (midFlight()) { logEvent(st.runs[0].env.t, '', 'Pilot handed over', `${PILOTS[k].label} now has the stick.`); syncControls(); }
+    if (midFlight()) { logEvent(st.runs[0].env.t, '', 'Pilot changed', `${PILOTS[k].name} from the next step.`); syncControls(); }
     else rebuild(true);
   }
   function setSafety(k) {
@@ -983,7 +958,7 @@
     if (midFlight() && st.tab === 'fly') {
       st.runs[0].env.safety = k;
       st.runs[0].safety = k;
-      logEvent(st.runs[0].env.t, k === 'off' ? 'red' : '', 'Safety layer switched', `${SAFETY[k].label} from the next step.`);
+      logEvent(st.runs[0].env.t, k === 'off' ? 'red' : '', 'Filter changed', `${SAFETY[k].label} from the next step.`);
       syncControls();
     } else rebuild(true);
   }
@@ -993,7 +968,7 @@
     if (midFlight()) {
       for (const r of st.runs) r.env.faults = Object.assign({}, f);
       const def = FAULTS.find((x) => x.key === key);
-      logEvent(st.runs[0].env.t, on ? 'red' : '', on ? `Fault injected: ${def.label}` : `Fault cleared: ${def.label}`, def.sub);
+      logEvent(st.runs[0].env.t, on ? 'red' : '', on ? `Fault on: ${def.label}` : `Fault off: ${def.label}`, def.sub);
       syncControls();
     } else rebuild(true);
   }
@@ -1024,7 +999,7 @@
     if (st.tab === 'campaign') return;
     if (allDone()) { rebuild(true); st.playing = true; }
     else { st.cursor = null; st.playing = !st.playing; }
-    if (st.playing && st.runs[0].frames.length === 1) logEvent(0, '', 'Approach started', `${PILOTS[st.pilot].label} flying under ${st.tab === 'compare' ? 'all three layers' : SAFETY[st.safety].label}.`);
+    if (st.playing && st.runs[0].frames.length === 1) logEvent(0, '', 'Started', `${PILOTS[st.pilot].name}, ${st.tab === 'compare' ? 'all three filters' : SAFETY[st.safety].label}.`);
     hideBanner();
     syncControls();
   }
@@ -1170,7 +1145,7 @@
     const ctrl = controllerFor(pilot);
     st.mc = { running: true, pilot, n, starts, modes, results: { off: [], v1: [], v2: [] }, done: 0, total: n * 3, domain: $('mcDomain').value };
     $('mcRun').disabled = true;
-    $('mcNote').textContent = pilot !== st.pilot ? 'Manual piloting cannot be batch-run; the glideslope flies instead.' : `Running ${PILOTS[pilot].label} on ${n} identical starts per layer…`;
+    $('mcNote').textContent = pilot !== st.pilot ? 'The manual pilot cannot be batch-run, so the glideslope flies instead.' : `Running ${PILOTS[pilot].name} on ${n} starts per filter.`;
     const work = () => {
       const t0 = performance.now();
       while (performance.now() - t0 < 14 && st.mc.done < st.mc.total) {
@@ -1187,7 +1162,7 @@
       else {
         st.mc.running = false;
         $('mcRun').disabled = false;
-        $('mcNote').textContent = `${PILOTS[pilot].label} · ${$('mcDomain').selectedOptions[0].text} · ${n} starts × 3 layers, seed ${seed}. Click any start to fly it.`;
+        $('mcNote').textContent = `${PILOTS[pilot].name}, ${$('mcDomain').selectedOptions[0].text.split(':')[0].toLowerCase()} conditions, ${n} starts per filter, seed ${seed}. Click a start to fly it.`;
       }
     };
     requestAnimationFrame(work);
@@ -1211,17 +1186,18 @@
       const list = mc ? mc.results[mode] : [];
       const sm = summarize(list);
       const pct = (x) => (sm.n ? (100 * x) / sm.n : 0);
-      const card = el('div', { class: 'panel mode', style: `border-left:3px solid ${MODE_COL[mode]}; cursor:pointer; ${st.mcMode === mode ? 'box-shadow: inset 0 0 0 1px ' + rgba(MODE_COL[mode], 0.5) : ''}` });
-      card.innerHTML = `<header><b>${SAFETY[mode].label}</b><span>${sm.n ? `${sm.n} episodes` : 'not run'}</span></header>
+      const card = el('div', { class: 'mode', role: 'button', tabindex: '0', 'aria-pressed': String(st.mcMode === mode), style: `--c:${MODE_COL[mode]}` });
+      card.innerHTML = `<header><b><i></i>${SAFETY[mode].label}</b><span>${sm.n ? `${sm.n} episodes` : 'not run yet'}</span></header>
         <div class="stack">${['docked', 'collision', 'fuel', 'out_of_bounds', 'timeout'].map((o) => `<i style="width:${pct(sm[o])}%;background:${OUTCOME_COL[o]}" title="${OUTCOME_TXT[o]} ${sm[o]}"></i>`).join('')}</div>
-        <dl><div><dt>Docked</dt><dd class="${sm.n && sm.docked === sm.n ? 'big-ok' : ''}">${sm.n ? pct(sm.docked).toFixed(1) + '%' : '—'}</dd></div>
-        <div><dt>Collisions</dt><dd class="${sm.collision ? 'big-bad' : ''}">${sm.n ? sm.collision : '—'}</dd></div>
-        <div><dt>Dock time</dt><dd>${Number.isFinite(sm.tDock) ? sm.tDock.toFixed(0) + ' s' : '—'}</dd></div>
-        <div><dt>Interv./ep</dt><dd>${Number.isFinite(sm.ovr) ? sm.ovr.toFixed(1) : '—'}</dd></div></dl>`;
+        <dl><div><dt>Docked</dt><dd class="${sm.n && sm.docked === sm.n ? 'ok' : ''}">${sm.n ? pct(sm.docked).toFixed(1) + '%' : '-'}</dd></div>
+        <div><dt>Collisions</dt><dd class="${sm.collision ? 'bad' : ''}">${sm.n ? sm.collision : '-'}</dd></div>
+        <div><dt>Mean dock time</dt><dd>${Number.isFinite(sm.tDock) ? sm.tDock.toFixed(0) + ' s' : '-'}</dd></div>
+        <div><dt>Interventions</dt><dd>${Number.isFinite(sm.ovr) ? sm.ovr.toFixed(1) : '-'}</dd></div></dl>`;
+      card.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); card.click(); } };
       card.onclick = () => { st.mcMode = mode; drawCampaign(); };
       box.appendChild(card);
     }
-    $('scatterLegend').innerHTML = Object.entries(OUTCOME_TXT).map(([k, v]) => `<span><i style="background:${OUTCOME_COL[k]}"></i>${v}</span>`).join('') + `<span style="margin-left:auto">showing <b style="color:${MODE_COL[st.mcMode]}">${SAFETY[st.mcMode].label}</b></span>`;
+    $('scatterLegend').innerHTML = Object.entries(OUTCOME_TXT).map(([k, v]) => `<span><i style="background:${OUTCOME_COL[k]}"></i>${v}</span>`).join('') + `<span style="margin-left:auto">showing ${SAFETY[st.mcMode].label}</span>`;
     drawScatter();
     drawHist();
   }
@@ -1239,7 +1215,7 @@
     axesText(ctx);
     const step = niceStep(ext / 2.5);
     for (let g = -Math.floor(ext / step) * step; g <= ext; g += step) {
-      ctx.strokeStyle = Math.abs(g) < 1e-9 ? 'rgba(160,190,230,0.3)' : COL.line;
+      ctx.strokeStyle = Math.abs(g) < 1e-9 ? grid(0.45) : COL.line;
       ctx.beginPath(); ctx.moveTo(cx + g * s, cy - ext * s); ctx.lineTo(cx + g * s, cy + ext * s); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(cx - ext * s, cy - g * s); ctx.lineTo(cx + ext * s, cy - g * s); ctx.stroke();
       ctx.fillText(String(+g.toFixed(1)), cx + g * s - 6, cy + ext * s + 14);
@@ -1248,11 +1224,11 @@
     ctx.fillText('V-bar, m →', cx + ext * s - 62, cy - 6);
     ctx.fillText('R-bar ↑', cx + 6, cy - ext * s + 10);
     ctx.beginPath(); ctx.arc(cx, cy, C.safeDist * s, 0, Math.PI * 2);
-    ctx.setLineDash([4, 5]); ctx.strokeStyle = 'rgba(255,181,71,0.5)'; ctx.stroke(); ctx.setLineDash([]);
+    ctx.setLineDash([4, 5]); ctx.strokeStyle = rgba(COL.amber, 0.6); ctx.stroke(); ctx.setLineDash([]);
     ctx.fillStyle = COL.green; ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2); ctx.fill();
     if (!mc) {
-      ctx.fillStyle = COL.muted; ctx.font = '500 13px Inter, system-ui, sans-serif';
-      const t = 'Run a campaign to see where each safety layer fails.';
+      ctx.fillStyle = COL.muted; ctx.font = font(13);
+      const t = 'No results yet. Press Run.';
       ctx.fillText(t, cx - ctx.measureText(t).width / 2, cy - 30);
       return;
     }
@@ -1279,7 +1255,10 @@
       peak = Math.max(peak, ...counts[mode]);
     }
     axesText(ctx);
-    for (let t = 0; t <= tmax; t += 60) ctx.fillText(`${t}s`, L + (t / tmax) * pw - 8, T + ph + 15);
+    for (let t = 0; t <= tmax; t += 60) {
+      const lbl = `${t} s`, tw = ctx.measureText(lbl).width;
+      ctx.fillText(lbl, clamp(L + (t / tmax) * pw - tw / 2, 0, rec.w - tw - 2), T + ph + 15);
+    }
     ctx.strokeStyle = COL.line; ctx.beginPath(); ctx.moveTo(L, T + ph); ctx.lineTo(L + pw, T + ph); ctx.stroke();
     for (const mode of ['off', 'v1', 'v2']) {
       const c = counts[mode];
@@ -1288,7 +1267,7 @@
       c.forEach((v, i) => { const y = T + ph - (v / peak) * ph; ctx.lineTo(L + (i / bins) * pw, y); ctx.lineTo(L + ((i + 1) / bins) * pw, y); });
       ctx.lineTo(L + pw, T + ph); ctx.fill(); ctx.stroke();
     }
-    ctx.font = '600 10px Inter, system-ui, sans-serif';
+    ctx.font = font(11, 600);
     ['off', 'v1', 'v2'].forEach((m, i) => { ctx.fillStyle = MODE_COL[m]; ctx.fillText(SAFETY[m].label, L + pw - 160 + i * 56, T + 10); });
   }
 
@@ -1353,7 +1332,8 @@
     ['scene', 'phase', 'profile', 'timelineCanvas', 'criticSpark', 'scatter', 'hist'].forEach(setupCanvas);
     bindStage(); bindTimeline(); bindKeys(); bindScatter();
     const params = new URLSearchParams(location.hash.replace(/^#/, ''));
-    loadScenario(SCENARIOS.some((s) => s.key === params.get('scenario')) ? params.get('scenario') : 'nominal');
+    const wanted = SCENARIO_ALIASES[params.get('scenario')] || params.get('scenario');
+    loadScenario(SCENARIOS.some((s) => s.key === wanted) ? wanted : 'nominal');
     if (params.get('view') && VIEWS[params.get('view')]) setView(params.get('view'));
     if (params.get('tab')) setTab(params.get('tab'));
     const pre = Number(params.get('steps') || 0);
@@ -1362,6 +1342,14 @@
     for (const [key, id] of [['mcStarts', 'mcStarts'], ['mcDomain', 'mcDomain'], ['mcN', 'mcN']]) if (params.get(key)) $(id).value = params.get(key);
     if (params.get('mc') === '1') { setTab('campaign'); runCampaign(); }
     window.SFLab = { st, stepAll, runCampaign, rebuild };
+    if (window.matchMedia) {
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+        readTheme();
+        $('axes').querySelector('.legendline i').style.background = COL.accent;
+        st.logDirty = true; st.dirty = true;
+        if (st.tab === 'campaign') drawCampaign();
+      });
+    }
     requestAnimationFrame(frame);
   }
   boot();

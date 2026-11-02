@@ -1,4 +1,4 @@
-"""Export what the browser Mission Lab needs from the Python reference stack.
+"""Export what the browser simulator needs from the Python reference stack.
 
     python -m spaceforge_mvp.viz.lab_export
 
