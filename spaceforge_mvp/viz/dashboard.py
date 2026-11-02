@@ -285,7 +285,7 @@ function drawStrip() {
   }
   // interlock events on the time axis, then the closest-approach marker
   const act = DATA.scenarios[state.key];
-  const EVENTS = ['emergency_hold', 'rejected', 'braking_substituted'];
+  const EVENTS = ['emergency_hold', 'emergency_brake', 'rejected', 'braking_substituted'];
   sctx.lineWidth = 1;
   act.frames.forEach((fr, k) => {
     if (!EVENTS.includes(fr.override)) return;
@@ -320,7 +320,8 @@ function statusOf(sc, f, i) {
   if (sc.summary.success && i >= sc.frames.length - 1) return ['DOCKED — SOFT CAPTURE', C.green];
   if (f.override === 'emergency_hold') return ['INTERLOCK — EMERGENCY HOLD', C.red];
   if (f.override === 'rejected') return ['INTERLOCK — THRUST REJECTED', C.red];
-  if (f.override === 'braking_substituted') return ['INTERLOCK — CERTIFIED BRAKING', C.amber];
+  if (f.override === 'braking_substituted') return ['RTA — CERTIFIED BACKUP FLYING', C.amber];
+  if (f.override === 'emergency_brake') return ['RTA — RESERVE BRAKING', C.amber];
   if (f.diverging) return ['DIVERGING — NO CAPTURE', C.red];
   if (f.dist < KEEP_OUT) return ['INSIDE KEEP-OUT — GLIDESLOPE', C.amber];
   return ['APPROACH — CLOSING', C.cyan];
@@ -451,29 +452,39 @@ def _prepared(scenario_key: str) -> Dict[str, Any]:
     return data
 
 
+def _outcome(summary: Dict[str, Any]) -> str:
+    """One-line caption computed from the recorded summary (never hand-written)."""
+    reason = summary["terminal_reason"]
+    fires = summary["overrides"]
+    if reason == "docked":
+        return (f"Docks in {summary['duration']:.0f} s · {summary['dv']:.2f} m/s Δv · "
+                f"{fires} interlock fire{'s' if fires != 1 else ''}")
+    if reason == "collision" or summary.get("penetrated"):
+        speed = summary.get("continuous_min_speed", summary["end_speed"])
+        return f"Collision · fly-through at {speed:.1f} m/s"
+    if reason == "out_of_bounds":
+        return f"No capture · left the {summary['end_dist']:.0f} m work volume at {summary['end_speed']:.1f} m/s"
+    return f"No capture · {reason} at {summary['end_dist']:.1f} m"
+
+
 META = {
-    "docking": ("Certified glideslope", "Docks in 97 s · 1.40 m/s Δv · zero interlock fires",
-                "glideslope", "#41D3FF",
+    "docking": ("Certified glideslope", "glideslope", "#41D3FF",
                 "The certified law: velocity matching on an exponential glideslope with the natural CW "
                 "drift cancelled in feed-forward. Runs to a soft capture, never needs a veto."),
-    "rl_policy": ("PPO policy as shipped", "No capture · ends 3.72 km out at 31 m/s",
-                  "PPO checkpoint", "#41D3FF",
-                  "The released checkpoint, 200k timesteps of PPO, replayed in the same environment it was "
-                  "trained in. It flies away and keeps accelerating; the interlock never fires because the "
-                  "failure happens far outside its authority."),
-    "hot_open": ("No runtime assurance", "Fly-through at 6.5 m/s",
-                 "reckless law", "#FF5F5F",
+    "rl_policy": ("PPO policy as shipped", "PPO checkpoint", "#41D3FF",
+                  "The released PPO checkpoint replayed in the environment it was trained in, through the "
+                  "same safety layer as every other run. The caption above is computed from this trace."),
+    "hot_open": ("No runtime assurance", "reckless law", "#FF5F5F",
                  "A deliberately reckless law: full thrust straight at the target, no braking logic. "
-                 "With nothing between policy and thrusters it passes within 1.4 cm of the target at 6.5 m/s."),
-    "hot_v1": ("Interlock v1 · zeroed veto", "Fly-through at 2.0 m/s",
-               "no protection · v1 · v2", "#FFB454",
-               "Same law under the MVP interlock: accelerating thrust inside the 5 m bubble is vetoed, and "
-               "the veto zeroes it. Denying thrust cut the impact speed by ~70% but did not stop the collision — "
+                 "With nothing between policy and thrusters it strikes the target."),
+    "hot_v1": ("Interlock v1 · zeroed veto", "no protection · v1 · v2", "#FFB454",
+               "Same law under the v1 interlock: unsafe thrust inside the 5 m bubble is vetoed, and the "
+               "veto zeroes it. Denying thrust lowers the impact speed but does not stop the collision -- "
                "the vehicle was already moving when it entered."),
-    "hot_v2": ("Interlock v2 · certified braking", "Soft capture in 8 s",
-               "no protection · v1 · v2", "#3DE08F",
-               "Same law, same physics: on veto the filter substitutes maximum braking along the velocity "
-               "vector. The identical approach now arrives at 0.01 m/s and captures."),
+    "hot_v2": ("RTA v2 · predictive filter", "no protection · v1 · v2", "#3DE08F",
+               "Same law, same physics: v2 predicts every step against a closing-speed envelope and, when "
+               "the policy's command would violate it, flies the certified glideslope backup instead. "
+               "The identical approach ends in a soft capture."),
 }
 
 
@@ -482,7 +493,8 @@ def build() -> Path:
     order = ["docking", "rl_policy", "hot_open", "hot_v1", "hot_v2"]
     for key in order:
         data = _prepared(key)
-        title, sub, tab, color, note = META[key]
+        title, tab, color, note = META[key]
+        sub = _outcome(data["summary"])
         data.update(key=key, name=title, title=title, subtitle=sub, tab=tab, color=color, note=note)
         scenarios[key] = data
 

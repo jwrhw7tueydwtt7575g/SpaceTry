@@ -14,7 +14,8 @@ visualisation without any training.
 
 from spaceforge_mvp.control.glideslope import (
     glideslope_action,
+    glideslope_controller,
     hot_approach_action,
 )
 
-__all__ = ["glideslope_action", "hot_approach_action"]
+__all__ = ["glideslope_action", "glideslope_controller", "hot_approach_action"]

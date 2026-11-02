@@ -1,5 +1,9 @@
 # SpaceForge — engineering critique
 
+> **Historical document.** This is the first-round critique. Its findings, and the defects a second
+> review found in the fixes that followed it, are resolved on the `fix/review-findings` branch; see
+> `MVP_SUMMARY.md` §5.8 for the second-round list and `VALIDATION_RESULTS.md` for current numbers.
+
 Ordered by what actually blocks the project. Every claim below has a command next to it; run them
 yourself before you quote me.
 

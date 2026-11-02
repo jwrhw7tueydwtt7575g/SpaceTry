@@ -69,7 +69,12 @@ def run_eval(
     )
     baseline_env = SpacecraftEnv(run_config=run_config) if run_config else SpacecraftEnv()
     baseline_metrics = _metrics_for_controller(
-        lambda _obs, baseline: glideslope_action(baseline.rel_pos, baseline.rel_vel), baseline_env, seeds
+        lambda _obs, baseline: glideslope_action(
+            baseline.rel_pos, baseline.rel_vel, n=baseline.physics_config.n,
+            dt=baseline.physics_config.dt, max_accel=baseline.actuator_config.max_cmd_accel,
+        ),
+        baseline_env,
+        seeds,
     )
     report = dict(policy_metrics)
     report.update({

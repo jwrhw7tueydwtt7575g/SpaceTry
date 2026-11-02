@@ -117,8 +117,11 @@ def test_invalid_domain_and_fault_configs_rejected(kwargs):
 
 
 def test_stuck_thruster_bias_dropout_leak_and_freeze():
-    stuck = rollout(SpacecraftEnv(faults=FaultConfig(stuck_axis=1, stuck_value=-0.5)), 9, ACTIONS)
-    assert all(info["executed_action"][1] == pytest.approx(-0.5) for _, _, _, info in stuck)
+    stuck_env = SpacecraftEnv(faults=FaultConfig(stuck_axis=1, stuck_value=-0.5))
+    stuck = rollout(stuck_env, 9, ACTIONS)
+    authority = stuck_env.actuator_config.max_cmd_accel
+    assert all(info["thruster_command"][1] == pytest.approx(-0.5) for _, _, _, info in stuck)
+    assert all(info["executed_action"][1] == pytest.approx(-0.5 * authority) for _, _, _, info in stuck)
     assert stuck[0][3]["fault"] == "stuck_thruster"
 
     leak_rate = 0.01

@@ -23,7 +23,8 @@ class SimBridge final : public rclcpp::Node {
  public:
   SimBridge() : Node("sim_bridge") {
     scenario_ = declare_parameter<std::string>("scenario", "leo_orbit");
-    declare_parameter<bool>("use_sim_time", true);
+    // use_sim_time is declared by rclcpp itself; re-declaring it throws
+    // ParameterAlreadyDeclaredException at startup. Launch sets it.
     gz_prefix_ = declare_parameter<std::string>("gz_prefix", "/world/leo_orbit");
     ros_prefix_ = declare_parameter<std::string>("ros_prefix", "spaceforge");
     mass_kg_ = declare_parameter<double>("chaser_mass_kg", 1.0);
@@ -46,6 +47,7 @@ class SimBridge final : public rclcpp::Node {
     command_sub_ = create_subscription<geometry_msgs::msg::WrenchStamped>(
       ros_prefix_ + "/chaser/cmd_wrench", rclcpp::QoS(10).reliable(),
       [this](geometry_msgs::msg::WrenchStamped::ConstSharedPtr msg) { this->onWrench(*msg); });
+    command_pub_ = gz_node_.Advertise<gz::msgs::Vector3d>(gz_prefix_ + "/model/chaser/command/accel");
     gz_node_.Subscribe(gz_prefix_ + "/clock", &SimBridge::onClock, this);
     gz_node_.Subscribe(gz_prefix_ + "/model/chaser/pose", &SimBridge::onPose, this);
     gz_node_.Subscribe(gz_prefix_ + "/model/chaser/velocity", &SimBridge::onVelocity, this);
@@ -94,9 +96,10 @@ class SimBridge final : public rclcpp::Node {
     sensor_msgs::msg::LaserScan out; out.header.stamp = stamp; out.header.frame_id = lidar_frame_; out.angle_min = msg.angle_min(); out.angle_max = msg.angle_max(); out.angle_increment = msg.angle_step(); out.range_min = msg.range_min(); out.range_max = msg.range_max(); for (int i = 0; i < msg.ranges_size(); ++i) out.ranges.push_back(msg.ranges(i)); lidar_pub_->publish(out);
   }
   void onWrench(const geometry_msgs::msg::WrenchStamped &msg) {
-    gz::msgs::Vector3d command; command.set_x(msg.wrench.force.x / mass_kg_); command.set_y(msg.wrench.force.y / mass_kg_); command.set_z(msg.wrench.force.z / mass_kg_); gz_node_.Publish(gz_prefix_ + "/model/chaser/command/accel", command);
+    gz::msgs::Vector3d command; command.set_x(msg.wrench.force.x / mass_kg_); command.set_y(msg.wrench.force.y / mass_kg_); command.set_z(msg.wrench.force.z / mass_kg_); command_pub_.Publish(command);
   }
   gz::transport::Node gz_node_;
+  gz::transport::Node::Publisher command_pub_;
   std::string scenario_, gz_prefix_, ros_prefix_, odom_frame_, base_frame_, imu_frame_, camera_frame_, lidar_frame_;
   double mass_kg_, clock_rate_, odom_rate_, imu_rate_, camera_rate_, lidar_rate_;
   int64_t last_clock_ns_{-1}, last_odom_ns_{-1}, last_imu_ns_{-1}, last_camera_ns_{-1}, last_lidar_ns_{-1};

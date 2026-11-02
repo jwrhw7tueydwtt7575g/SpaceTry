@@ -74,46 +74,50 @@ def build_manifest() -> Dict[str, Dict[str, Any]]:
         },
         "02_rl_policy": {
             "title": "Shipped PPO policy",
-            "subtitle": "Same environment · seed 42 · 300 s horizon · 200k timesteps trained",
+            "subtitle": "Same environment · seed 42 · 300 s horizon · 0.1 m/s² authority",
             "tracks": lambda: [_load("rl_policy", "PPO checkpoint, as shipped", CYAN)],
             "frames_per_step": 1,
             "hold_frames": 54,
             "notes": [
-                f"No capture · final range {rl['end_dist'] / 1000.0:.2f} km, "
-                f"{rl['end_speed']:.1f} m/s and rising",
-                f"Δv {rl['dv']:.1f} m/s burned · interlock fires {rl['overrides']}"
-                " — the escape never enters its authority",
+                (f"Soft capture at {rl['end_dist']:.3f} m · {rl['end_speed']:.3f} m/s at contact"
+                 if rl["success"] else
+                 f"No capture ({rl['terminal_reason']}) · final range {rl['end_dist']:.1f} m, "
+                 f"{rl['end_speed']:.2f} m/s"),
+                f"Δv {rl['dv']:.2f} m/s · fuel used {rl['fuel_used'] * 100:.2f}% · interlock fires {rl['overrides']}",
             ],
             "intro": {
                 "kicker": "ACT 2 · SHIPPED POLICY",
                 "headline": "What does the released checkpoint do?",
-                "lines": ["PPO, 200,000 timesteps, replayed in the very environment it was",
-                          "trained in. Same seed, same physics, same safety layer."],
+                "lines": ["PPO, replayed in the very environment it was trained in.",
+                          "Same seed, same physics, same safety layer as the glideslope."],
                 "color": CYAN,
                 "frames": 66,
             },
             "outro": {
                 "kicker": "ACT 2 · RESULT",
-                "headline": "NO CAPTURE",
+                "headline": "DOCKED" if rl["success"] else "NO CAPTURE",
                 "verdict": True,
-                "head_color": RED,
-                "stat_color": RED,
-                "lines": [f"Closest approach {rl['min_dist']:.2f} m — it never enters the 5 m keep-out,",
-                          "so the safety layer never gets a vote. The failure lives outside its authority."],
-                "stats": [("Final range", f"{rl['end_dist'] / 1000.0:.2f} km"),
-                          ("Rel speed", f"{rl['end_speed']:.1f} m/s"),
-                          ("Δv burned", f"{rl['dv']:.1f} m/s"),
+                "head_color": GREEN if rl["success"] else RED,
+                "stat_color": GREEN if rl["success"] else RED,
+                "lines": ([f"The learned policy captures in {rl['duration']:.0f} s; the certified glideslope",
+                           f"does it in {dock['duration']:.0f} s on less fuel -- RL is not yet the better pilot."]
+                          if rl["success"] else
+                          [f"Closest approach {rl['min_dist']:.2f} m; episode ended: {rl['terminal_reason']}.",
+                           "The policy does not dock from this start."]),
+                "stats": [("Closest approach", f"{rl['min_dist']:.3f} m"),
+                          ("Contact speed" if rl["success"] else "End speed", f"{rl['end_speed']:.3f} m/s"),
+                          ("Δv", f"{rl['dv']:.2f} m/s"),
                           ("Interlock fires", f"{rl['overrides']}")],
                 "frames": 120,
             },
         },
         "03_runtime_assurance": {
             "title": "Runtime assurance showdown",
-            "subtitle": "Identical reckless law · 6 m start · 1 s step · 60 s horizon",
+            "subtitle": "Identical reckless law · 6 m start · 1 s step · 120 s horizon",
             "tracks": lambda: [
                 _load("hot_open", "NO PROTECTION — powered through", RED),
                 _load("hot_v1", "v1 · THRUST ZEROED ON VETO", AMBER),
-                _load("hot_v2", "v2 · CERTIFIED BRAKING", GREEN),
+                _load("hot_v2", "v2 · PREDICTIVE RTA + CERTIFIED BACKUP", GREEN),
             ],
             "frames_per_step": 2,
             "hold_frames": 60,
@@ -132,11 +136,13 @@ def build_manifest() -> Dict[str, Dict[str, Any]]:
                 "verdict": True,
                 "head_color": GREEN,
                 "stat_color": GREEN,
-                "lines": ["Denying a command is not braking: the veto cut impact speed by 70% and still",
-                          "collided; substituting maximum braking captures at 1 cm/s."],
+                "lines": ["Denying a command is not braking: the veto still collided at "
+                          f"{hot_1['continuous_min_speed']:.2f} m/s;",
+                          "predicting each step and flying the certified backup captures at "
+                          f"{hot_2['continuous_min_speed']:.3f} m/s."],
                 "stats": [("No protection", f"{hot_o['continuous_min_speed']:.2f} m/s"),
                           ("Veto → zero thrust", f"{hot_1['continuous_min_speed']:.2f} m/s"),
-                          ("Veto → braking", f"{hot_2['continuous_min_speed']:.2f} m/s"),
+                          ("Predictive RTA", f"{hot_2['continuous_min_speed']:.3f} m/s"),
                           ("Result", f"docked in {hot_2['steps']} s")],
                 "frames": 125,
             },
