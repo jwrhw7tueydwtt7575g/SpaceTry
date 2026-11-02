@@ -31,10 +31,42 @@ def _close(a, b, path="fixtures"):
         assert a == b, f"{path}: {a!r} != {b!r}"
 
 
+def _committed():
+    return json.loads((lab_export.LAB_DIR / "fixtures.json").read_text())
+
+
 def test_fixtures_match_the_python_reference():
-    committed = json.loads((lab_export.LAB_DIR / "fixtures.json").read_text())
-    fresh = json.loads(lab_export.fixtures_text(lab_export.build_fixtures()))
+    committed = _committed()
+    fresh = json.loads(lab_export.fixtures_text(lab_export.build_fixtures(include_policy=False)))
+    committed["episodes"] = [ep for ep in committed["episodes"] if ep["controller"] != "ppo"]
     _close(fresh, committed)
+
+
+def test_policy_episodes_replay_exactly_and_match_the_checkpoint():
+    """PPO episodes: physics must replay exactly; network outputs only to float32 tolerance.
+
+    Torch's float32 matmul rounds differently across CPUs and BLAS builds (~1e-8 per
+    action), so regenerating these episodes is not bit-reproducible. Instead, drive the
+    Python env with the committed actions (pos/vel must match to 1e-9) and check the
+    shipped checkpoint produces those actions from the same observations.
+    """
+    from stable_baselines3 import PPO
+
+    model = PPO.load(str(lab_export.CHECKPOINT), device="cpu")
+    episodes = [ep for ep in _committed()["episodes"] if ep["controller"] == "ppo"]
+    assert len(episodes) == 2
+    for ep in episodes:
+        actions = iter(step["action"] for step in ep["steps"])
+
+        def replay(obs, model=model, actions=actions):
+            action = np.asarray(next(actions), dtype=np.float64)
+            live = model.predict(obs, deterministic=True)[0]
+            np.testing.assert_allclose(live, action, atol=2e-5)
+            return action
+
+        fresh = lab_export._episode(ep["name"], "ppo", ep["start_pos"], ep["start_vel"], ep["safety"],
+                                    max_steps=ep["max_steps"], fuel=ep["fuel"], policy=replay)
+        _close(json.loads(json.dumps(fresh)), ep, ep["name"])
 
 
 def test_policy_weights_match_the_shipped_checkpoint():
