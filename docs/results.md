@@ -7,16 +7,16 @@ installed (`pip install -e .`).
 ## Recorded scenarios
 
 `python3 -m spaceforge_mvp.viz.scenarios` writes these traces to `spaceforge_mvp/viz/scenarios/`.
-For the reckless runs, closest approach and speed come from replaying the commands at 10 ms, because
+For the direct-thrust runs, closest approach and speed come from replaying the commands at 10 ms, because
 a 1 s step can jump over the 0.5 m capture sphere.
 
 | Trace | Controller | Filter | Seed | Steps | Start range | Δv (m/s) | Filter actions | Outcome |
 |---|---|---|---|---|---|---|---|---|
 | `docking` | glideslope | v1 | 42 | 98 | 14.33 m | 1.381 | 0 | docked |
 | `rl_policy` | PPO | v1 | 42 | 208 | 18.22 m | 2.148 | 0 | docked |
-| `hot_open` | reckless | off | 7 | 11 | 6.00 m | 1.106 | 0 | collision: 4 cm at 1.10 m/s |
-| `hot_v1` | reckless | v1 | 7 | 14 | 6.00 m | 0.500 | 9 | collision: 26 cm at 0.50 m/s |
-| `hot_v2` | reckless | v2 | 7 | 72 | 6.00 m | 0.595 | 69 | docked: 48 cm at 0.017 m/s |
+| `hot_open` | direct | off | 7 | 11 | 6.00 m | 1.106 | 0 | collision: 4 cm at 1.10 m/s |
+| `hot_v1` | direct | v1 | 7 | 14 | 6.00 m | 0.500 | 9 | collision: 26 cm at 0.50 m/s |
+| `hot_v2` | direct | v2 | 7 | 72 | 6.00 m | 0.595 | 69 | docked: 48 cm at 0.017 m/s |
 
 ## Glideslope
 
@@ -47,7 +47,7 @@ python3 -m spaceforge_mvp.eval.run_eval --checkpoint checkpoints/ppo_spacecraft_
 
 The checkpoint was chosen on seeds 1000-1099, which are not used for any number above.
 
-## Reckless law against each filter
+## Direct law against each filter
 
 From the Monte Carlo tab of the browser simulator, 250 starts uniformly within ±6 m per axis:
 
@@ -56,6 +56,8 @@ From the Monte Carlo tab of the browser simulator, 250 starts uniformly within �
 | off | 0 | 247 |
 | v1 | 0 | 137 |
 | v2 | 250 | 0 |
+
+![Monte Carlo tab, direct law under v2](images/lab-montecarlo.png)
 
 ## Validation matrix
 

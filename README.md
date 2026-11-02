@@ -2,14 +2,15 @@
 
 A small testbed for spacecraft rendezvous and docking in Python. A chaser vehicle starts up to 20 m
 from a target and has to arrive within 0.5 m at under 0.1 m/s. Any controller can fly it: a
-glideslope guidance law, a PPO policy, a deliberately reckless law, or you with a keyboard. A
+glideslope guidance law, a PPO policy, a "direct" law that thrusts straight at the target and never
+brakes, or you with a keyboard. A
 runtime-assurance filter sits between the controller and the thrusters and takes over for any step
 that would leave a closing-speed envelope.
 
 Relative motion uses the Clohessy-Wiltshire equations, propagated with their exact state transition
 matrix. Everything runs on a CPU.
 
-![Mission Lab](docs/images/lab-fly.png)
+![Docking simulator](docs/images/lab-fly.png)
 
 ## Quick start
 
@@ -54,7 +55,7 @@ python3 -m spaceforge_mvp.simulate --controller glideslope --safety v2 \
 The PPO policy docks every time, but on its own it enters the keep-out zone at almost five times
 the 0.2 m/s limit. With v2 in the loop it stays under the limit.
 
-A reckless law that thrusts straight at the target, 250 starts within 6 m (Monte Carlo tab of the
+The direct law, 250 starts within 6 m (Monte Carlo tab of the
 browser simulator):
 
 | Filter | Docked | Collisions |
@@ -71,7 +72,7 @@ of the tank). Its training is unstable: held-out success across snapshots of one
 
 - **v1** rejects any command inside 5 m that does not lower the speed while the vehicle is moving
   faster than 0.2 m/s. A rejected command is zeroed, so the vehicle coasts. Coasting is not
-  braking, which is why v1 still lets the reckless law hit the target.
+  braking, which is why v1 still lets the direct law hit the target.
 - **v2** predicts each step under the controller's command and checks it against a closing-speed
   limit. Outside 5 m the limit is a braking curve that ends at 0.2 m/s at the keep-out boundary.
   Inside 5 m it tapers to 0.05 m/s. If the step would break the limit, the glideslope flies that
@@ -88,7 +89,7 @@ spaceforge_mvp/
   core/cw_dynamics.py       exact CW propagation
   env/spacecraft_env.py     Gymnasium environment (10-D observation, 3-D thrust command)
   safety/mission_safety.py  v1 interlock and the shared speed envelope
-  control/glideslope.py     glideslope guidance and the reckless test law
+  control/glideslope.py     glideslope guidance and the direct test law
   control/rta.py            v2 runtime-assurance filter
   training/, eval/          PPO training, evaluation, validation matrix
   simulate.py               command-line mission runner

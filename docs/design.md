@@ -93,7 +93,7 @@ The first version of this policy never docked. At 1 m/s² of authority per unit 
 exploration noise alone changes speed by about 1 m/s per step, against a docking limit of 0.1 m/s.
 With the same PPO settings, 0.1 m/s² trains to 100% and 1 m/s² to 0%.
 
-**Reckless** (`hot_approach_action`). Full thrust at the target, never brakes. It exists to test
+**Direct** (`hot_approach_action`, "hot" on the command line). Full thrust at the target, never brakes. It exists to test
 the filters.
 
 ## Safety filters
@@ -107,7 +107,7 @@ decide what reaches the thrusters.
 - Within 5 m and faster than 0.2 m/s: a command passes only if it lowers the speed over the next
   step. Anything else is zeroed.
 
-v1 cannot brake on its own. A vehicle that is already fast coasts on into the target: the reckless
+v1 cannot brake on its own. A vehicle that is already fast coasts on into the target: the direct
 law hits at 0.50 m/s instead of 1.10 m/s.
 
 ### v2: runtime assurance (`control/rta.py`)

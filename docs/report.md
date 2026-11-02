@@ -55,7 +55,7 @@ velocity, fuel, elapsed time, bearing) and a 3-value action. Episodes end on doc
   tracks it with a proportional gain, and cancels the CW drift terms in feed-forward.
 - *PPO.* A 64-64 MLP trained with Stable-Baselines3 for 300k steps on random starts. The shipped
   snapshot was chosen on held-out seeds.
-- *Reckless.* Full thrust at the target, used only to test the filters.
+- *Direct.* Full thrust at the target, used only to test the filters.
 
 **Filters.**
 
@@ -76,13 +76,13 @@ a vehicle below it can reach the 5 m boundary at 0.2 m/s with half the available
 **Evaluation.** Each controller-filter pair is run from the same random starts. Each run records
 whether it docked, whether it collided, fuel, Δv, filter interventions, and the closing speed when
 it crossed into the 5 m zone. A browser version of the simulator, checked against the Python code
-to 1e-9 m, is used for interactive runs and the reckless-law Monte Carlo.
+to 1e-9 m, is used for interactive runs and the direct-law Monte Carlo.
 
 ## 4. Results
 
-**Recorded runs** (seed 42 for the docking runs, seed 7 for the reckless runs; 0.1 m/s² authority):
+**Recorded runs** (seed 42 for the glideslope and PPO runs, seed 7 for the direct runs; 0.1 m/s² authority):
 
-| | Glideslope | PPO | Reckless, no filter | Reckless, v1 | Reckless, v2 |
+| | Glideslope | PPO | Direct, no filter | Direct, v1 | Direct, v2 |
 |---|---|---|---|---|---|
 | Filter | v1 | v1 | off | v1 | v2 |
 | Start range | 14.33 m | 18.22 m | 6.00 m | 6.00 m | 6.00 m |
@@ -97,7 +97,7 @@ to 1e-9 m, is used for interactive runs and the reckless-law Monte Carlo.
 - The PPO policy docks 500/500 fresh starts with every filter setting. Unfiltered, it enters the
   keep-out zone at up to 0.958 m/s, almost five times the limit. With v2 the maximum is 0.194 m/s,
   at the cost of 10.8 interventions per flight.
-- Against the reckless law over 250 close starts, collisions drop from 247 (no filter) to 137 (v1)
+- Against the direct law over 250 close starts, collisions drop from 247 (no filter) to 137 (v1)
   to 0 (v2).
 
 **Training.** At 1 m/s² of authority per unit command, PPO did not learn to dock at all (0%). At
@@ -129,7 +129,7 @@ Limitations:
 A Simplex-style filter with a glideslope backup lets an unverified controller fly a docking
 approach while holding a closing-speed limit along the whole approach, not just at the end. In
 these tests the filter never had to act on the glideslope, kept a trained PPO policy under the
-limit at a cost of about 11 interventions per flight, and turned a reckless controller's 247
+limit at a cost of about 11 interventions per flight, and turned the direct law's 247
 collisions out of 250 into 250 dockings.
 
 ## References

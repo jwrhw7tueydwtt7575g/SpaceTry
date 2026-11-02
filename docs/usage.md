@@ -35,7 +35,7 @@ python3 -m spaceforge_mvp.simulate \
 
 | Flag | Values |
 |---|---|
-| `--controller` | `glideslope`, `rl` (needs `--checkpoint checkpoints/ppo_spacecraft_final.zip`), `hot` (reckless) |
+| `--controller` | `glideslope`, `rl` (needs `--checkpoint checkpoints/ppo_spacecraft_final.zip`), `hot` (direct thrust at the target, for testing the filters) |
 | `--safety` | `off`, `v1`, `v2` |
 | `--max-accel` | actuator authority in m/s² per unit command, default 0.1 |
 | `--nondeterministic` | sample PPO actions instead of using the mean |
