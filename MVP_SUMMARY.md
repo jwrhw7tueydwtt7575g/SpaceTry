@@ -16,6 +16,12 @@ claimed and what the repository did is itself one of the findings.
 > predictive and no longer lets a coasting, sideways-thrusting or mislabelled vehicle through
 > (§5.8). The ROS 2 / Gazebo stack builds and its tests run, including a live launch -> Gazebo ->
 > bridge round trip, in a ROS 2 Humble + Gazebo Harmonic container that mirrors the `ros` CI job.
+>
+> **feat/ui-overhaul.** The replay page is replaced by the **Mission Lab**: the simulator, both
+> safety layers and the PPO network run live in one offline HTML file, parity-tested against
+> Python. Plotting closing speed against range there exposed a gap in v2 (§5.9): the envelope
+> stopped at the keep-out sphere, so the shipped PPO entered it at up to 0.96 m/s. v2 now enforces
+> a braking curve outside the sphere.
 
 ---
 
@@ -188,7 +194,7 @@ Note the 1 Hz sampler can step over the 0.5 m bubble at m/s speeds; use
 | `viz/dashboard.py` | 497 | **added** | Emits self-contained interactive HTML replay |
 | `viz/scenarios.py` | 89 | **added** | Defines and records the five benchmark scenarios |
 | `viz/preview.py` | 59 | **added** | Renders single frames for inspection |
-| `tests/` (15 files) | ~1400 | mixed | 84 tests total (see `pytest --collect-only`) |
+| `tests/` (16 files) | ~1500 | mixed | 90 tests total (see `pytest --collect-only`) |
 
 ### Quick Directory & Folder Summary
 
@@ -262,6 +268,27 @@ Each item has a regression test (`tests/test_review_regressions.py`, `tests/test
 | ROS CI could not fail | Python tests died at import with no results (reported as 0 failures); launch_testing + pytest 8 dropped most test files |
 | Two validation metrics could not fail | "sim-to-sim" compared the env with a mock wrapping the same env; perception was solved on noise-free projections |
 
+### 5.9 Third pass: the envelope stopped at the keep-out sphere (fixed on `feat/ui-overhaul`)
+Found by plotting closing speed against range in the new Mission Lab. v2 only checked the envelope
+*inside* the 5 m sphere and predicted one step ahead, so any pilot that accelerated outside it
+arrived at the edge far above the 0.2 m/s gate and was braked only once inside.
+
+| Pilot | Fastest keep-out entry before | After |
+|---|---|---|
+| Reckless law, 6 m start | 0.30 m/s | 0.17 m/s |
+| Reckless law, oblique start | ~1 m/s | 0.17 m/s |
+| Shipped PPO, 500 fresh seeds (v2) | 0.958 m/s | 0.194 m/s |
+
+Fix: outside the sphere the envelope is a braking curve,
+`v_lim(r) = sqrt(0.2^2 + 2 * f * a_max * (r - 5))` with `f = SafetyConfig.outer_braking_fraction`
+(default 0.5). From anywhere under it, half the actuator authority still reaches the edge at the
+gate speed. The certified glideslope sits well inside the curve (0 takeovers on 500 seeds, unchanged).
+`outer_braking_fraction=None` restores the legacy inside-only envelope. Tests:
+`test_v2_never_enters_the_keep_out_sphere_above_the_gate`, `test_legacy_inside_only_envelope_still_available`,
+and `test_v2_takeover_lands_inside_the_envelope_or_slows_the_closure`, which replaces "a takeover
+never adds speed". The backup legitimately accelerates a slow vehicle, so the invariant that
+matters is staying inside the envelope.
+
 ---
 
 ## 6. What has been added
@@ -279,8 +306,10 @@ Predictive, minimal-intervention filter. Every step is checked (sampled through 
 at its end) against a closing-speed envelope that tapers from 0.2 m/s at 5 m to half the docking
 speed near the target, plus a capture-sphere fly-through test. An unsafe policy command is replaced
 by the certified glideslope (Simplex backup); if even that is unsafe, by a speed-sized brake on the
-closing component. It never adds speed, never reverses the vehicle, never pushes a retreating vehicle
-toward the target, and still brakes below the fuel floor (`emergency_brake`).
+closing component. Outside the sphere the envelope is a braking curve down to 0.2 m/s at the edge
+(§5.9), so no pilot enters the keep-out sphere above the gate. The brake never adds speed or reverses
+the vehicle; nothing pushes a retreating vehicle toward the target; and it still brakes below the
+fuel floor (`emergency_brake`).
 
 ### 6.4 CLI Simulation Orchestrator — `simulate.py` & `config.py` (NEW)
 - Provides typed `MissionConfig` object.
@@ -291,12 +320,18 @@ toward the target, and still brakes below the fuel floor (`emergency_brake`).
 ### 6.5 Telemetry Recorder, Videos & Dashboard
 - `viz/record.py`: Unified episode recorder delegating to `SpacecraftEnv`.
 - `viz/render.py` & `viz/make_videos.py`: 1080p MP4 renderer for 3 acts and stitched presentation film.
-- `viz/dashboard.py`: Standalone HTML replay widget (`dashboard.html`).
+- `viz/lab/` + `viz/dashboard.py`: the **Mission Lab** (`dashboard.html`), one offline HTML file
+  that runs the environment, both safety layers and the PPO network live: fly / compare /
+  Monte Carlo modes, manual piloting, mid-flight fault injection, envelope phase plane.
+  `viz/lab/sim.js` is a JavaScript port checked against Python-generated fixtures
+  (`viz/lab_export.py`, 1063 checks in `lab/sim.test.js`; `tests/test_lab_export.py` keeps the
+  fixtures and exported weights in sync with Python and the checkpoint).
 
 ### 6.6 Test suites
-- MVP: **84 tests** (`pytest spaceforge_mvp/tests -q`): CW dynamics, environment, interlocks, RTA,
+- MVP: **90 tests** (`pytest spaceforge_mvp/tests -q`): CW dynamics, environment, interlocks, RTA,
   domain randomization, validation matrix, CLI, regression tests for every review finding,
-  renderer/dashboard smoke, and a check that the shipped checkpoint docks.
+  renderer/dashboard smoke, a check that the shipped checkpoint docks, and Mission Lab parity.
+- Mission Lab: **1063 parity checks** (`node spaceforge_mvp/viz/lab/sim.test.js`).
 - ROS packages offline (the `python` CI job's selection): **155 passed, 9 skipped**.
 - ROS CI job (`colcon build` + `colcon test`, Humble + Harmonic container): **170 tests, 0 failures**,
   including the live Gazebo integration test.
@@ -316,7 +351,7 @@ values (10 ms replay) where the trace was annotated.
 | `rl_policy` (shipped PPO) | v1 | 42 | 208 | 18.22 m | 0.4809 m | 0.0216 m/s | 2.148 | 0 | **docked** |
 | `hot_open` (reckless) | off | 7 | 11 | 6.00 m | 0.0417 m | 1.0957 m/s | 1.106 | 0 | collision |
 | `hot_v1` (zeroing veto) | v1 | 7 | 14 | 6.00 m | 0.2634 m | 0.4998 m/s | 0.500 | 9 | collision |
-| `hot_v2` (predictive RTA) | v2 | 7 | 70 | 6.00 m | 0.4850 m | 0.0170 m/s | 0.795 | 66 | **docked** |
+| `hot_v2` (predictive RTA) | v2 | 7 | 72 | 6.00 m | 0.4844 m | 0.0170 m/s | 0.595 | 69 | **docked** |
 
 ### 7.2 The certified guidance law over 200 seeds
 - **200 / 200 dockings** (100% success rate)
@@ -333,6 +368,7 @@ vehicle about 1 m/s per step against a 0.1 m/s docking tolerance. Controlled com
 |---|---|
 | `run_eval`, seeds 42–91 | 100% success, fuel 0.0241, 205.8 steps, 3 overrides, acceptance passed |
 | 500 fresh seeds, safety v1 / v2 / off | 500/500 docked each, 0 collisions |
+| Keep-out entry speed, same 500 seeds | off / v1: up to **0.958 m/s** (gate 0.2); v2: at most 0.194 m/s, 10.8 takeovers/episode, 190 steps |
 | vs glideslope | does **not** beat it: slower (206 vs 107 steps) and more fuel (0.024 vs 0.014) |
 | Training stability | poor: held-out success across snapshots of one run: 100, 58, 31, 1, 86, 98% |
 
@@ -348,7 +384,7 @@ From the repository root:
 # 0. Activate virtual environment
 source .venv/bin/activate
 
-# 1. Run full test suite (84 tests)
+# 1. Run full test suite (90 tests)
 python3 -m pytest spaceforge_mvp/tests -q
 
 # 2. Run CLI Mission Simulation

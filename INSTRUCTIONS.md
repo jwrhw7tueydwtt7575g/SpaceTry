@@ -1,4 +1,4 @@
-# INSTRUCTIONS — build the videos and run the dashboard yourself
+# INSTRUCTIONS — build the videos and run the Mission Lab yourself
 
 Everything in this file has been run on the machine this repository was prepared on (Ubuntu, Python
 3.13). Commands start from the repository root, and the expected output is shown after each one so
@@ -7,7 +7,7 @@ you can tell immediately whether a step worked.
 Nothing here needs a GPU, a server, or an internet connection except the one-time package install.
 
 **What you get when you finish:** four MP4s (three acts plus a stitched 45-second film) and
-`dashboard.html`, an interactive replay of the same telemetry that runs straight from your browser.
+`dashboard.html`, the Mission Lab: a live, parity-tested simulation of the same environment that runs straight from your browser.
 
 **Time:** about 10 minutes, most of it waiting for the video render.
 
@@ -161,37 +161,47 @@ Writes `docking_000.png`, `docking_030.png`, `docking_060.png` into
 
 ---
 
-## 5. Build and open the dashboard
+## 5. Build and open the Mission Lab
 
 ```bash
 PYTHONPATH=. .venv/bin/python -m spaceforge_mvp.viz.dashboard
 ```
 
 Writes `spaceforge_mvp/viz/dashboard.html` and prints
-`dashboard written: /.../dashboard.html  (182 KB)`. It is completely self-contained — the telemetry
-is inlined as JSON, there is no server, no CDN and no internet fetch — so you can also email the file
-to someone and it will still work.
-
-Open it:
+`dashboard written: /.../dashboard.html  (≈180 KB)`. It is self-contained: the simulator, both
+safety layers and the PPO network's weights are inlined; there is no server and no internet fetch
+(an optional web font falls back to system fonts offline), so you can email the file and it works.
 
 ```bash
 xdg-open spaceforge_mvp/viz/dashboard.html        # or double-click it in your file manager
 ```
 
-**Controls:** the five scenarios are tabs across the top; the space bar plays and pauses; `←` and `→`
-step four frames at a time; the slider scrubs; the 0.5× / 1× / 2× buttons change playback speed. The
-right-hand panel is the live HUD — range, closing rate, relative speed, thrust split into
-radial / in-track / cross-track, fuel, and the interlock fire count. The lower chart plots range on a
-log scale for every scenario at once, with a ▼ marking each closest approach and a tick wherever the
-interlock fired.
+**Fly (key 1).** Choose a scenario, pilot (glideslope, PPO, reckless, or *You*) and safety layer,
+then press space. Toggle faults at any time; they apply from the next step. The badge on the scene
+says who has authority this step (pilot, RTA backup, envelope brake, v1 veto). The dashed arc is
+where the vehicle would coast if every thruster died now; it turns red when that coast hits the
+station too fast. The *Safety envelope* chart is the core of the concept: closing speed against
+range, with the forbidden region shaded. In *Orbit plane* or *Cross-track* view, click the scene
+to place the chaser. Manual flight: `W/S` R-bar, `A/D` V-bar, `Q/E` H-bar.
 
-If your browser refuses to run JavaScript from a local file (uncommon, but some hardened setups do),
-serve the directory instead:
+**Compare (key 2).** The same pilot, start and faults, flown under off / v1 / v2 simultaneously.
+
+**Monte Carlo (key 3).** Runs N identical starts per safety layer with the pilot chosen on the left,
+optionally under domain randomization or the validation-matrix fault set. Click a start to fly it.
+
+Other keys: `.` single step, `R` reset, `←/→` scrub (`shift` = 10 steps), `V` cycle views, `F` fit.
+Deep links work, e.g. `dashboard.html#scenario=slam&tab=compare`.
+
+**Where the numbers come from.** The page runs a JavaScript port of the Python environment. Check it
+against the Python reference with:
 
 ```bash
-python3 -m http.server 8000
-# then open http://localhost:8000/spaceforge_mvp/viz/dashboard.html
+PYTHONPATH=. .venv/bin/python -m spaceforge_mvp.viz.lab_export   # regenerate fixtures (after physics/safety/checkpoint changes)
+node spaceforge_mvp/viz/lab/sim.test.js                         # 1063 parity checks
 ```
+
+For development, serve the repository root (`python3 -m http.server 8000`) and open
+`http://localhost:8000/spaceforge_mvp/viz/lab/index.html`; it loads the unbundled sources.
 
 ---
 

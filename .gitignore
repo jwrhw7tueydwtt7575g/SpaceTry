@@ -39,6 +39,7 @@ htmlcov/
 # Checkpoint binaries & intermediate test outputs
 checkpoints/ppo_spacecraft_[0-9]*.zip
 *.png
+!docs/images/*.png
 logs/
 tensorboard_logs/
 

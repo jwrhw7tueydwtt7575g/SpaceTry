@@ -12,12 +12,14 @@
   },
   "reported_results": {
     "run_eval_seeds_42_91": {"success_rate": 1.0, "avg_fuel_used": 0.0241, "avg_episode_length": 205.84, "safety_overrides": 3, "acceptance_passed": true, "beats_glideslope_baseline": false},
-    "fresh_seeds_5000_5499": {"v1": "500/500 docked, 0 collisions", "v2": "500/500 docked, 0 collisions", "off": "500/500 docked, 0 collisions"}
+    "fresh_seeds_5000_5499": {"v1": "500/500 docked, 0 collisions", "v2": "500/500 docked, 0 collisions", "off": "500/500 docked, 0 collisions"},
+    "keep_out_entry_closing_speed_max_mps": {"off": 0.958, "v1": 0.958, "v2_outer_braking_curve": 0.194, "gate": 0.2}
   },
   "known_limitations": [
     "Training is unstable: held-out success swings between 1% and 100% across snapshots of one run.",
     "Slower and less fuel-efficient than the glideslope baseline (fuel 0.024 vs 0.014 of the tank).",
-    "Trained and validated only on the nominal domain (no randomization or faults)."
+    "Trained and validated only on the nominal domain (no randomization or faults).",
+    "Unprotected, it enters the 5 m keep-out sphere at up to 0.96 m/s; it relies on the v2 runtime-assurance filter to respect the 0.2 m/s gate."
   ],
   "acceptance_thresholds": {"min_success_rate": 0.85, "max_avg_fuel_used": 0.35, "max_safety_overrides_per_episode": 1.0}
 }

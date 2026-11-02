@@ -25,9 +25,26 @@ success_above_threshold=true, fuel_within_budget=true, no_invariant_violations=t
 |---|---|
 | `python3 -m spaceforge_mvp.eval.run_eval checkpoints/ppo_spacecraft_final.zip --episodes 50` | 100% success, fuel 0.0241, 205.8 steps, 3 overrides, acceptance passed, does not beat glideslope |
 | 500 fresh seeds (5000–5499), safety v1 / v2 / off | 500/500 docked each, 0 collisions |
+| Fastest keep-out (5 m) entry, same seeds | off / v1: 0.958 m/s, almost 5x the 0.2 m/s gate; v2: 0.194 m/s (10.8 takeovers/episode) |
 
 Selected on held-out seeds 1000–1099, disjoint from the reporting seeds; see
 `checkpoints/ppo_spacecraft_final.metadata.json`. Training is unstable across snapshots.
+
+## Runtime assurance v2: the outer braking curve
+
+v2 enforces `v_lim(r) = sqrt(0.2^2 + 2 * 0.5 * a_max * (r - 5))` outside the keep-out sphere and
+the taper to capture speed inside it. Measured on the seeds above: the glideslope never trips it
+(0 takeovers, fastest entry 0.175 m/s), and every v2 episode in the parity fixtures stays under the
+envelope at every step (worst margin -0.002 m/s). Before this change the reckless law and the PPO
+policy entered the sphere at 0.3–1 m/s.
+
+## Mission Lab parity (browser simulation vs Python)
+
+`node spaceforge_mvp/viz/lab/sim.test.js`: **1063/1063** checks. That is 160 random cases each for
+CW propagation, glideslope, v2 filter, v1 interlock, step prediction and the brakes; 86 envelope
+values; and 12 full episodes compared step by step (position and velocity to 1e-9, fuel to 1e-12,
+identical safety overrides and outcomes). The browser PPO forward pass matches SB3 to 2e-5 per
+action and reproduces the same docking when free-running.
 
 ## Perception pose error (OpenCV solvePnP vs ground truth, 120 random poses)
 

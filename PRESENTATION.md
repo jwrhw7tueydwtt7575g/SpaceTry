@@ -90,7 +90,7 @@ flowchart TD
 
     subgraph S_OUT ["Telemetry & Visualization"]
         JSON_OUT["Structured JSON\n(mission / telemetry / metrics)"]
-        DASH["dashboard.html\n(Interactive HTML5 Replay)"]
+        DASH["dashboard.html\n(Mission Lab: live in-browser sim)"]
         MP4["make_videos.py\n(1080p MP4 Presentation)"]
     end
 
@@ -113,7 +113,7 @@ flowchart TD
 * **Testing & Quality Assurance:** Pytest (40 automated unit, integration, and smoke test suites).
 * **Data Visualization & Analytics:** Matplotlib (2D trajectory rendering, telemetry curves).
 * **Video Encoding:** FFmpeg (1920×1080 broadcast MP4 rendering at 30 fps).
-* **Interactive Frontend:** HTML5, Tailwind CSS, Canvas API, JavaScript (Standalone zero-dependency dashboard).
+* **Interactive Frontend:** HTML5, Canvas 2D, vanilla JavaScript: the Mission Lab runs the parity-tested simulator, both safety layers and the PPO network in one offline file.
 
 ---
 
