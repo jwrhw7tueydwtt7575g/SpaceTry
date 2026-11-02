@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#04070d">
+<title>SpaceForge Mission Lab</title>
+<meta name="description" content="Fly a spacecraft rendezvous in the browser: certified guidance, a learned PPO pilot or your own hands, with a runtime-assurance filter that keeps every one of them off the station.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true">
+        <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5cd4ff"/><stop offset="1" stop-color="#3fdd9b"/></linearGradient></defs>
+        <circle cx="16" cy="16" r="13" fill="none" stroke="url(#lg)" stroke-width="1.6" stroke-dasharray="3 3.2" opacity=".75"/>
+        <circle cx="16" cy="16" r="6.5" fill="none" stroke="url(#lg)" stroke-width="1.6"/>
+        <circle cx="16" cy="16" r="2.3" fill="#3fdd9b"/>
+        <circle cx="26.5" cy="9" r="2.4" fill="#5cd4ff"/>
+      </svg>
+      <div><b>SpaceForge</b><span>Mission Lab · runtime-assured docking</span></div>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Mode">
+      <button class="tab" role="tab" data-tab="fly" aria-selected="true">Fly <kbd>1</kbd></button>
+      <button class="tab" role="tab" data-tab="compare" aria-selected="false">Compare <kbd>2</kbd></button>
+      <button class="tab" role="tab" data-tab="campaign" aria-selected="false">Monte Carlo <kbd>3</kbd></button>
+    </nav>
+    <div class="spacer"></div>
+    <span class="chip" title="The browser simulation replays Python-generated fixtures in CI"><i></i>Python-parity sim · exact CW</span>
+    <button class="ghost" id="aboutBtn">How it works</button>
+  </header>
+
+  <main class="main">
+    <!-- ======================================================= setup rail -->
+    <aside class="rail left">
+      <div class="panel">
+        <section class="section" id="scenarioSection">
+          <h2 class="label">Scenario</h2>
+          <div class="scenarios" id="scenarios"></div>
+          <p class="desc" id="scenarioDesc"></p>
+        </section>
+        <section class="section">
+          <h2 class="label">Pilot <small>who wants the stick</small></h2>
+          <div class="seg" id="pilotSeg"></div>
+          <p class="desc" id="pilotDesc"></p>
+        </section>
+        <section class="section" id="safetySection">
+          <h2 class="label">Safety layer</h2>
+          <div class="seg" id="safetySeg"></div>
+          <p class="desc" id="safetyDesc"></p>
+        </section>
+        <section class="section">
+          <h2 class="label">Inject faults <small>live, mid-flight</small></h2>
+          <div class="switches" id="faults"></div>
+        </section>
+        <section class="section" id="startSection">
+          <h2 class="label">Start offset <small>metres, LVLH</small></h2>
+          <div class="startgrid">
+            <label>R-bar<input id="sx" type="number" step="0.5"></label>
+            <label>V-bar<input id="sy" type="number" step="0.5"></label>
+            <label>H-bar<input id="sz" type="number" step="0.5"></label>
+          </div>
+          <div class="row-btns">
+            <button class="ghost" id="randomStart">Random start</button>
+            <button class="ghost" id="applyStart">Apply</button>
+          </div>
+          <p class="hint">In plane view, click the scene to place the chaser.</p>
+        </section>
+      </div>
+    </aside>
+
+    <!-- ======================================================= center -->
+    <section class="center" id="flyCenter">
+      <div class="panel stage" id="stage">
+        <canvas id="scene" aria-label="Rendezvous scene"></canvas>
+        <div class="overlay tl">
+          <div class="authority" id="authority" data-src="none"><i class="dot"></i><b id="authWho">READY</b><span id="authWhy">Press play or space to start the approach.</span></div>
+        </div>
+        <div class="overlay tr">
+          <div class="views" id="views">
+            <button data-view="3d" aria-pressed="true">3D</button>
+            <button data-view="plane" aria-pressed="false">Orbit plane</button>
+            <button data-view="side" aria-pressed="false">Cross-track</button>
+          </div>
+          <button class="iconbtn" id="fitBtn" title="Fit view (F)">Fit</button>
+        </div>
+        <div class="overlay bl" id="keysHint" hidden>
+          <div class="keys">
+            <span>Thrust</span>
+            <kbd data-k="w">W</kbd><kbd data-k="s">S</kbd><span>R-bar</span>
+            <kbd data-k="a">A</kbd><kbd data-k="d">D</kbd><span>V-bar</span>
+            <kbd data-k="q">Q</kbd><kbd data-k="e">E</kbd><span>H-bar</span>
+          </div>
+        </div>
+        <div class="banner" id="banner"><b id="bannerTitle"></b><span id="bannerSub"></span></div>
+      </div>
+
+      <div class="charts">
+        <article class="panel chart">
+          <header><h3>Safety envelope</h3><span>closing speed vs range · dashed = 0.2 m/s gate</span></header>
+          <canvas id="phase"></canvas>
+        </article>
+        <article class="panel chart">
+          <header><h3>Approach profile</h3><span>range (log) and speed over time</span></header>
+          <canvas id="profile"></canvas>
+        </article>
+      </div>
+
+      <div class="panel transport">
+        <button class="play" id="playBtn" aria-label="Play (space)">
+          <svg id="playIcon" width="14" height="14" viewBox="0 0 14 14"><path d="M3 1.5v11l9.5-5.5z" fill="currentColor"/></svg>
+        </button>
+        <button class="tbtn" id="stepBtn" title="Single step (.)">Step</button>
+        <button class="tbtn" id="resetBtn" title="Reset (R)">Reset</button>
+        <div class="timeline" id="timeline"><canvas id="timelineCanvas"></canvas></div>
+        <div class="clock" id="clock">T+000 s</div>
+        <div class="speeds" id="speeds"></div>
+      </div>
+    </section>
+
+    <!-- ======================================================= campaign -->
+    <section class="center" id="campaignCenter" hidden>
+      <div class="campaign">
+        <article class="panel chart">
+          <header><h3>Start dispersion</h3><span id="scatterSub">orbit plane · click a start to fly it</span></header>
+          <canvas id="scatter"></canvas>
+          <div class="legend" id="scatterLegend"></div>
+        </article>
+        <div class="results" id="results"></div>
+      </div>
+      <article class="panel chart">
+        <header><h3>Time to dock</h3><span>distribution per safety layer</span></header>
+        <canvas id="hist"></canvas>
+      </article>
+    </section>
+
+    <!-- ======================================================= telemetry rail -->
+    <aside class="rail right" id="flyRight">
+      <div class="panel">
+        <div class="status">
+          <div class="phase"><b id="phaseTxt">STANDBY</b><span class="met" id="met">MET 00:00</span></div>
+          <div class="big"><span class="v" id="range">—</span><span class="u" id="rangeU">m</span><small>range to port</small></div>
+        </div>
+        <div class="stats">
+          <div class="stat"><span>Closing</span><b id="closing">—</b></div>
+          <div class="stat"><span>Speed</span><b id="speed">—</b></div>
+          <div class="stat"><span>Δv spent</span><b id="dv">—</b></div>
+          <div class="stat"><span>Interventions</span><b id="ovr">—</b></div>
+        </div>
+        <div class="gauge">
+          <div class="meta"><span>Envelope use</span><b id="envTxt">—</b></div>
+          <div class="bar env"><i id="envBar"></i><em style="left: 100%"></em></div>
+        </div>
+        <div class="gauge" style="padding-top:0">
+          <div class="meta"><span>Propellant</span><b id="fuelTxt">—</b></div>
+          <div class="bar"><i id="fuelBar"></i><em id="floorMark"></em></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="axes" id="axes">
+          <h2 class="label" style="margin:0 0 2px">Thrusters <small>normalised, ±1 = 0.1 m/s²</small></h2>
+        </div>
+      </div>
+      <div class="panel" id="criticPanel" hidden>
+        <div class="critic">
+          <span>Policy critic V(s)</span><b id="criticV">—</b>
+          <canvas id="criticSpark"></canvas>
+        </div>
+      </div>
+      <div class="panel">
+        <h2 class="label" style="padding:12px 14px 0;margin:0">Flight log</h2>
+        <div class="log" id="log"><div class="empty">No events yet.</div></div>
+      </div>
+    </aside>
+
+    <aside class="rail right" id="compareRight" hidden>
+      <div class="cmp" id="cmpCards"></div>
+      <p class="note" style="padding:0 4px">Same pilot, same start, same faults: only the safety layer differs. Watch where each trail diverges in the envelope chart.</p>
+    </aside>
+
+    <aside class="rail right" id="campaignRight" hidden>
+      <div class="panel">
+        <section class="section">
+          <h2 class="label">Campaign</h2>
+          <div style="display:grid;gap:10px">
+            <label class="note">Episodes per safety layer
+              <select id="mcN"><option>100</option><option selected>250</option><option>500</option><option>1000</option></select>
+            </label>
+            <label class="note">Domain
+              <select id="mcDomain">
+                <option value="nominal">Nominal</option>
+                <option value="randomized">Randomized: mass ±20%, thrust ±10%, sensor noise</option>
+                <option value="faults">Faults: bias, dropout, freeze, leak</option>
+              </select>
+            </label>
+            <label class="note">Starts
+              <select id="mcStarts">
+                <option value="train">Training box: ±20 m, ±5 mm/s</option>
+                <option value="close">Close in: ±6 m, ±5 cm/s</option>
+                <option value="hot">Hot: ±10 m, ±0.3 m/s</option>
+              </select>
+            </label>
+            <label class="note">Seed <input id="mcSeed" type="number" value="1" style="width:100%;background:rgba(0,0,0,.3);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:12.5px var(--mono)"></label>
+            <button class="primary" id="mcRun">Run campaign</button>
+            <div class="progress"><i id="mcProg"></i></div>
+            <p class="note" id="mcNote">Every safety layer flies the identical set of starts with the pilot chosen on the left. Faults toggled on the left are added on top of the domain.</p>
+          </div>
+        </section>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<dialog id="about">
+  <div class="about">
+    <h2>Let anything fly. Never let it hit the station.</h2>
+    <p class="lede">SpaceForge treats every pilot (a learned policy, a planner, a human on a joystick) as untrusted. A runtime-assurance filter predicts each control step against a closing-speed envelope and, only when the step would breach it, hands authority to a certified backup law. This is the Simplex architecture.</p>
+    <svg viewBox="0 0 820 210" role="img" aria-label="Simplex runtime assurance architecture">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#8b9ab0"/></marker>
+        <marker id="arA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#ffb547"/></marker>
+        <marker id="arG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#3fdd9b"/></marker>
+      </defs>
+      <g font-family="Inter, system-ui, sans-serif" font-size="13">
+        <rect x="10" y="20" width="170" height="74" rx="12" fill="#0f1826" stroke="#5cd4ff" stroke-opacity=".6"/>
+        <text x="95" y="50" fill="#5cd4ff" text-anchor="middle" font-weight="600">Untrusted pilot</text>
+        <text x="95" y="70" fill="#8b9ab0" text-anchor="middle" font-size="11.5">PPO · LLM plan · human</text>
+        <rect x="10" y="122" width="170" height="74" rx="12" fill="#0f1826" stroke="#ffb547" stroke-opacity=".6"/>
+        <text x="95" y="152" fill="#ffb547" text-anchor="middle" font-weight="600">Certified backup</text>
+        <text x="95" y="172" fill="#8b9ab0" text-anchor="middle" font-size="11.5">glideslope · envelope brake</text>
+        <rect x="290" y="56" width="240" height="104" rx="14" fill="#101b2b" stroke="#3fdd9b" stroke-opacity=".7"/>
+        <text x="410" y="88" fill="#3fdd9b" text-anchor="middle" font-weight="600">Runtime-assurance monitor</text>
+        <text x="410" y="110" fill="#8b9ab0" text-anchor="middle" font-size="11.5">predict the next step (8 samples)</text>
+        <text x="410" y="128" fill="#8b9ab0" text-anchor="middle" font-size="11.5">closing speed ≤ v_lim(range)?</text>
+        <text x="410" y="146" fill="#8b9ab0" text-anchor="middle" font-size="11.5">capture sphere entered slowly?</text>
+        <rect x="640" y="70" width="170" height="76" rx="12" fill="#0f1826" stroke="#56657b"/>
+        <text x="725" y="102" fill="#e8eef7" text-anchor="middle" font-weight="600">Thrusters</text>
+        <text x="725" y="122" fill="#8b9ab0" text-anchor="middle" font-size="11.5">exact CW dynamics</text>
+        <path d="M180 57 H290" stroke="#8b9ab0" stroke-width="1.6" fill="none" marker-end="url(#ar)"/>
+        <path d="M180 159 C235 159 240 130 290 130" stroke="#ffb547" stroke-width="1.6" fill="none" marker-end="url(#arA)"/>
+        <path d="M530 98 H640" stroke="#3fdd9b" stroke-width="1.8" fill="none" marker-end="url(#arG)"/>
+        <text x="585" y="88" fill="#3fdd9b" text-anchor="middle" font-size="11">safe step</text>
+        <text x="235" y="48" fill="#8b9ab0" text-anchor="middle" font-size="11">command</text>
+        <text x="236" y="182" fill="#ffb547" text-anchor="middle" font-size="11">used only on breach</text>
+        <path d="M725 146 V190 H410 V160" stroke="#56657b" stroke-dasharray="4 4" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
+        <text x="565" y="204" fill="#56657b" text-anchor="middle" font-size="11">state feedback</text>
+      </g>
+    </svg>
+    <div class="cols">
+      <div><h4>Off</h4><p>Whatever the pilot commands reaches the thrusters. The reckless law strikes the station at over 1 m/s.</p></div>
+      <div><h4>v1 · veto</h4><p>The legacy interlock can only say no, and a veto means zero thrust, so a fast vehicle still coasts into the target.</p></div>
+      <div><h4>v2 · runtime assurance</h4><p>Predictive and minimal: the pilot keeps the stick whenever the step is safe; otherwise the certified backup flies that step.</p></div>
+    </div>
+    <footer>
+      <span>The browser simulation is a port of the Python environment (exact Clohessy-Wiltshire transition matrix) and is checked against Python-generated fixtures in CI. The PPO pilot is the shipped checkpoint, running in plain JavaScript.</span>
+      <button class="ghost" id="aboutClose">Close</button>
+    </footer>
+  </div>
+</dialog>
+
+<script src="policy.js"></script>
+<script src="sim.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

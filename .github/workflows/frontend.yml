@@ -3,6 +3,20 @@ on:
   push:
   pull_request:
 jobs:
+  mission-lab:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Browser simulation matches the Python reference (fixtures)
+        run: node spaceforge_mvp/viz/lab/sim.test.js
+      - name: Syntax check
+        run: |
+          node --check spaceforge_mvp/viz/lab/sim.js
+          node --check spaceforge_mvp/viz/lab/app.js
+          node --check spaceforge_mvp/viz/lab/policy.js
   dashboard:
     runs-on: ubuntu-latest
     steps:
