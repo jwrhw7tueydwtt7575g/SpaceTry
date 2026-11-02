@@ -14,7 +14,7 @@ Observation (10,) float32:
     [8:10] 2D unit bearing vector pointing from the chaser at the target
 
 Action (3,) float32 in [-1, 1]:
-    commanded acceleration [ax, ay, az] in m/s^2 (scaled by MAX_CMD_ACCEL)
+    normalized command; physical acceleration = action * ActuatorConfig.max_cmd_accel (m/s^2)
 
 Reward components are reported in ``info["reward_breakdown"]``.  Position terms
     use metres, velocity uses metres/sec, effort uses normalized actuator command,
@@ -202,7 +202,7 @@ class SpacecraftEnv(gym.Env):
         """Draw a fresh random relative state and return (obs, info)."""
         super().reset(seed=seed)
 
-        if self.mission is None:
+        if self.mission is None or (self.reset_config is not None and not self.reset_config.use_mission_state):
             reset = self.reset_config
             distribution = reset.distribution if reset else "uniform"
             pos_bound = reset.position_bound if reset else self.env_config.initial_pos_bound
@@ -348,7 +348,15 @@ class SpacecraftEnv(gym.Env):
 
         progress = self.env_config.progress_reward_weight * (dist_prev - dist)
         divergence = -self.env_config.divergence_penalty_weight * max(0.0, dist - dist_prev)
-        velocity = -self.env_config.velocity_penalty_weight * speed
+        if self.env_config.velocity_penalty_mode == "approach":
+            if dist > _EPS:
+                ref_speed = min(self.env_config.approach_closing_cap, dist / self.env_config.approach_glide_time)
+                v_ref = -self.rel_pos / dist * ref_speed
+            else:
+                v_ref = np.zeros(3, dtype=np.float64)
+            velocity = -self.env_config.velocity_penalty_weight * float(np.linalg.norm(self.rel_vel - v_ref))
+        else:
+            velocity = -self.env_config.velocity_penalty_weight * speed
         fuel_penalty = -self.env_config.fuel_penalty_weight * fuel_used
         effort = -self.env_config.action_penalty_weight * thrust_mag
         risk = 0.0

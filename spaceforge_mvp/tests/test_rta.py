@@ -22,6 +22,9 @@ from spaceforge_mvp.core.cw_dynamics import cw_step
 from spaceforge_mvp.safety.mission_safety import evaluate_goal
 
 SLAM_START = np.array([6.0, 0.0, 0.0])
+# These scenarios model a vehicle with 1 m/s^2 per unit command, stated explicitly
+# rather than inherited from the ActuatorConfig default.
+A1 = 1.0
 
 
 def _rollout(safety: str, steps: int = 30):
@@ -41,13 +44,14 @@ def _rollout(safety: str, steps: int = 30):
                 current_speed=float(np.linalg.norm(vel)),
                 commanded_action=cmd,
                 rel_vel=vel,
+                max_accel=A1,
             )
             if verdict["status"] == "accepted":
                 applied = cmd
             else:
                 applied, override = np.zeros(3), verdict["status"]
         elif safety == "v2":
-            decision = apply_safety_filter(cmd, pos, vel, fuel)
+            decision = apply_safety_filter(cmd, pos, vel, fuel, max_accel=A1)
             applied, override = decision["applied"], decision["override"]
         else:
             applied = cmd
@@ -70,8 +74,7 @@ def test_accepted_command_passes_through_untouched():
         commanded_action=cmd,
         rel_pos=np.array([12.0, 0.0, 0.0]),
         rel_vel=np.zeros(3),
-        fuel_remaining=1.0,
-    )
+        fuel_remaining=1.0, max_accel=A1)
     assert out["override"] is None
     np.testing.assert_allclose(out["applied"], cmd)
 
@@ -81,7 +84,7 @@ def test_vetoed_command_is_replaced_by_braking_not_by_zero():
     pos = np.array([3.0, 0.0, 0.0])
     vel = np.array([-0.6, 0.0, 0.0])  # closing at 0.6 m/s, envelope is ~0.12 here
     cmd = np.array([-1.0, 0.0, 0.0])  # still accelerating at the target: unsafe
-    out = apply_safety_filter(cmd, pos, vel, fuel_remaining=0.5)
+    out = apply_safety_filter(cmd, pos, vel, fuel_remaining=0.5, max_accel=A1)
 
     assert out["override"] == BRAKING_SUBSTITUTED
     assert out["applied"][0] > 0.0  # pushes away from the target
@@ -93,7 +96,7 @@ def test_vetoed_command_is_replaced_by_braking_not_by_zero():
 
 def test_coasting_into_the_target_is_not_accepted_as_braking():
     """A zero command while closing fast is coasting; v2 must take over."""
-    out = apply_safety_filter(np.zeros(3), np.array([3.0, 0.0, 0.0]), np.array([-0.6, 0.0, 0.0]), 1.0)
+    out = apply_safety_filter(np.zeros(3), np.array([3.0, 0.0, 0.0]), np.array([-0.6, 0.0, 0.0]), 1.0, max_accel=A1)
     assert out["override"] == BRAKING_SUBSTITUTED
     assert out["applied"][0] > 0.0
 
@@ -101,7 +104,7 @@ def test_coasting_into_the_target_is_not_accepted_as_braking():
 def test_lateral_thrust_with_token_braking_is_not_accepted():
     """u.v < 0 but a large lateral component: predicted unsafe, policy loses authority."""
     pos, vel = np.array([2.0, 0.0, 0.0]), np.array([-0.3, 0.0, 0.0])
-    out = apply_safety_filter(np.array([0.01, 1.0, 1.0]), pos, vel, 1.0)
+    out = apply_safety_filter(np.array([0.01, 1.0, 1.0]), pos, vel, 1.0, max_accel=A1)
     assert out["override"] == BRAKING_SUBSTITUTED
     _, next_vel = cw_step(pos, vel, out["applied"], dt=1.0)
     assert np.linalg.norm(next_vel) <= np.linalg.norm(vel) + 1e-9
@@ -110,7 +113,7 @@ def test_lateral_thrust_with_token_braking_is_not_accepted():
 def test_retreating_vehicle_is_never_pushed_back_toward_the_target():
     """Opening range fast inside the bubble is not a collision risk: no override."""
     for cmd in (np.zeros(3), np.array([1.0, 0.0, 0.0])):
-        out = apply_safety_filter(cmd, np.array([3.0, 0.0, 0.0]), np.array([0.6, 0.0, 0.0]), 1.0)
+        out = apply_safety_filter(cmd, np.array([3.0, 0.0, 0.0]), np.array([0.6, 0.0, 0.0]), 1.0, max_accel=A1)
         assert out["override"] is None
         np.testing.assert_allclose(out["applied"], cmd)
 
@@ -121,8 +124,7 @@ def test_fuel_floor_holds_when_safe():
         commanded_action=np.array([-1.0, -1.0, -1.0]),
         rel_pos=np.array([3.0, 0.0, 0.0]),
         rel_vel=np.array([0.6, 0.0, 0.0]),  # opening range
-        fuel_remaining=0.01,
-    )
+        fuel_remaining=0.01, max_accel=A1)
     assert out["override"] == "emergency_hold"
     np.testing.assert_allclose(out["applied"], [0.0, 0.0, 0.0])
 
@@ -133,8 +135,7 @@ def test_fuel_floor_never_disables_collision_avoidance():
         commanded_action=np.zeros(3),
         rel_pos=np.array([3.0, 0.0, 0.0]),
         rel_vel=np.array([-0.6, 0.0, 0.0]),  # closing fast
-        fuel_remaining=0.01,
-    )
+        fuel_remaining=0.01, max_accel=A1)
     assert out["override"] == EMERGENCY_BRAKE
     assert out["applied"][0] > 0.0
 
@@ -142,7 +143,7 @@ def test_fuel_floor_never_disables_collision_avoidance():
 def test_goal_label_does_not_disable_v2():
     """By default no goal label switches the envelope off."""
     out = apply_safety_filter(np.array([-1.0, 0.0, 0.0]), np.array([3.0, 0.0, 0.0]),
-                              np.array([-0.6, 0.0, 0.0]), 1.0, goal_type="DOCK")
+                              np.array([-0.6, 0.0, 0.0]), 1.0, goal_type="DOCK", max_accel=A1)
     assert out["override"] == BRAKING_SUBSTITUTED
 
 
@@ -155,7 +156,7 @@ def test_braking_action_never_increases_speed():
             np.array([0.2, 0.1, -1.0]),
         ):
             vel = direction / np.linalg.norm(direction) * speed
-            brake = certified_brake_action(vel)
+            brake = certified_brake_action(vel, max_accel=A1)
             assert float(np.dot(brake, vel)) < 0.0
             assert np.linalg.norm(brake) <= 1.0 + 1e-12
             np.testing.assert_allclose(np.linalg.norm(brake), min(1.0, speed), atol=1e-9)

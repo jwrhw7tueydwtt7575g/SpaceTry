@@ -31,7 +31,7 @@ from typing import Any, Dict
 
 import numpy as np
 
-from spaceforge_mvp.config import PHYSICS_CONFIG, SAFETY_CONFIG, SafetyConfig
+from spaceforge_mvp.config import ACTUATOR_CONFIG, PHYSICS_CONFIG, SAFETY_CONFIG, SafetyConfig
 from spaceforge_mvp.control.glideslope import glideslope_action
 from spaceforge_mvp.safety.mission_safety import (
     closing_speed,
@@ -50,7 +50,7 @@ _EPS = 1e-9
 
 def certified_brake_action(
     rel_vel: np.ndarray,
-    max_accel: float = 1.0,
+    max_accel: float = ACTUATOR_CONFIG.max_cmd_accel,
     dt: float = 1.0,
 ) -> np.ndarray:
     """Speed-sized deceleration anti-parallel to the relative velocity.
@@ -75,7 +75,7 @@ def envelope_correction(
     rel_pos: np.ndarray,
     rel_vel: np.ndarray,
     safety_config: SafetyConfig = SAFETY_CONFIG,
-    max_accel: float = 1.0,
+    max_accel: float = ACTUATOR_CONFIG.max_cmd_accel,
     dt: float = 1.0,
     margin: float = 0.9,
 ) -> np.ndarray:
@@ -115,7 +115,7 @@ def apply_safety_filter(
     goal_type: str = "APPROACH",
     safety_config: SafetyConfig = SAFETY_CONFIG,
     dt: float = 1.0,
-    max_accel: float = 1.0,
+    max_accel: float = ACTUATOR_CONFIG.max_cmd_accel,
     n: float = PHYSICS_CONFIG.n,
 ) -> Dict[str, Any]:
     """Return the command that may actually reach the thrusters.

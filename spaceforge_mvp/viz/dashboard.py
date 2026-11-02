@@ -472,9 +472,8 @@ META = {
                 "The certified law: velocity matching on an exponential glideslope with the natural CW "
                 "drift cancelled in feed-forward. Runs to a soft capture, never needs a veto."),
     "rl_policy": ("PPO policy as shipped", "PPO checkpoint", "#41D3FF",
-                  "The released checkpoint replayed in the environment it was trained in. It flies away "
-                  "until it leaves the work volume; the interlock never fires because the failure happens "
-                  "outside its authority."),
+                  "The released PPO checkpoint replayed in the environment it was trained in, through the "
+                  "same safety layer as every other run. The caption above is computed from this trace."),
     "hot_open": ("No runtime assurance", "reckless law", "#FF5F5F",
                  "A deliberately reckless law: full thrust straight at the target, no braking logic. "
                  "With nothing between policy and thrusters it strikes the target."),

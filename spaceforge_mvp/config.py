@@ -81,12 +81,22 @@ class EnvConfig:
     # collision: the episode terminates and this penalty is applied.
     collision_penalty: float = 50.0
     terminate_on_collision: bool = True
+    # Velocity term: "speed" penalizes |v| (legacy, which also punishes the
+    # motion needed to dock); "approach" penalizes |v - v_ref| where v_ref is
+    # a safe glideslope approach velocity, which densely teaches braking.
+    velocity_penalty_mode: str = "speed"
+    approach_glide_time: float = 30.0
+    approach_closing_cap: float = 0.5
 
     def __post_init__(self) -> None:
         if self.max_steps < 1:
             raise ValueError("EnvConfig.max_steps must be at least one")
         if min(self.pos_norm_scale, self.vel_norm_scale, self.initial_pos_bound, self.initial_vel_bound, self.docking_success_dist, self.work_volume_bound) <= 0.0:
             raise ValueError("Environment scales and bounds must be positive")
+        if self.velocity_penalty_mode not in {"speed", "approach"}:
+            raise ValueError("velocity_penalty_mode must be 'speed' or 'approach'")
+        if self.approach_glide_time <= 0.0 or self.approach_closing_cap <= 0.0:
+            raise ValueError("approach shaping parameters must be positive")
         if min(self.progress_reward_weight, self.velocity_penalty_weight, self.action_penalty_weight, self.divergence_penalty_weight, self.fuel_penalty_weight, self.collision_risk_penalty_weight, self.docking_bonus, self.collision_penalty) < 0.0:
             raise ValueError("Reward weights and docking_bonus must be non-negative")
 
@@ -100,6 +110,11 @@ class ResetConfig:
     curriculum_stage: int = 0
     curriculum_position_bounds: Tuple[float, ...] = (5.0, 10.0, 20.0)
     curriculum_velocity_bounds: Tuple[float, ...] = (0.05, 0.1, 0.2)
+    # True: every reset starts from the mission's start state (fixed-mission
+    # runs). False: the mission supplies physics/safety only and the start
+    # state is drawn from this distribution -- the only way to train on
+    # random starts with a non-default RunConfig.
+    use_mission_state: bool = True
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "curriculum_position_bounds", tuple(float(v) for v in self.curriculum_position_bounds))
@@ -170,7 +185,7 @@ class MissionConfig:
 @dataclass(frozen=True)
 class ActuatorConfig:
     """Action conversion and fuel-consumption parameters."""
-    max_cmd_accel: float = 1.0
+    max_cmd_accel: float = 0.1  # m/s^2 per unit command; see MVP_SUMMARY.md (RL learnability)
     fuel_rate_scale: float = 0.001
 
     def __post_init__(self) -> None:

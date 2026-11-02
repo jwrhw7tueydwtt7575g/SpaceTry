@@ -169,7 +169,9 @@ def record_episode(
         override = info.get("safety_override")
         if override is not None:
             overrides += 1
-        dv += float(np.sum(np.abs(applied)))
+        # Delta-v in m/s (L1 over axes): physical acceleration actually
+        # delivered, times the step -- not the sum of normalized commands.
+        dv += float(np.sum(np.abs(np.asarray(info.get("executed_action", applied), dtype=np.float64)))) * float(env.physics_config.dt)
         step += 1
 
         dist = float(np.linalg.norm(env.rel_pos))

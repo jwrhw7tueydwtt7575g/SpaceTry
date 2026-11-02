@@ -15,7 +15,7 @@ from typing import Dict, Optional
 
 import numpy as np
 
-from spaceforge_mvp.config import SAFETY_CONFIG, SafetyConfig
+from spaceforge_mvp.config import ACTUATOR_CONFIG, SAFETY_CONFIG, SafetyConfig
 
 SAFE_APPROACH_DIST: float = SAFETY_CONFIG.safe_approach_dist
 FUEL_FLOOR: float = SAFETY_CONFIG.fuel_floor
@@ -107,7 +107,7 @@ def is_braking_command(
     commanded_action: np.ndarray,
     rel_vel: np.ndarray,
     dt: float = 1.0,
-    max_accel: float = 1.0,
+    max_accel: float = ACTUATOR_CONFIG.max_cmd_accel,
 ) -> bool:
     """A command brakes only if it opposes the velocity AND lowers the speed.
 
@@ -133,7 +133,7 @@ def evaluate_goal(
     rel_vel: Optional[np.ndarray] = None,
     safety_config: SafetyConfig = SAFETY_CONFIG,
     dt: float = 1.0,
-    max_accel: float = 1.0,
+    max_accel: float = ACTUATOR_CONFIG.max_cmd_accel,
 ) -> Dict[str, str]:
     """
     Evaluate a candidate command against the v1 interlock rules.

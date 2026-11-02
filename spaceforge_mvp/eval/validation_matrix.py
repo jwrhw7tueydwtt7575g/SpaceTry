@@ -3,11 +3,17 @@
 Runs over 100 evaluation episodes plus offline probes and reports:
   1. docking success rate per domain level vs the agreed 0.85 threshold
   2. fuel benchmark (mean/max fuel_used and delta-v)
-  3. perception pose error vs ground truth (OpenCV solvePnP, offline)
+  3. perception pose error vs ground truth (OpenCV solvePnP, offline), under
+     pixel noise; the noise-free solve is reported only as a solver sanity check
   4. LLM goal validity through mission_ctrl (mock provider, offline)
   5. curriculum completion (synthetic outcome streams, offline)
   6. safety invariants over every matrix step (bounds, finiteness, fuel range)
-  7. sim-to-sim gap: SpacecraftEnv vs SpacecraftRLEnv+MockTransport, same seeds
+  7. sim-to-sim gap: the exact-STM environment vs an independent RK4
+     integration of the CW ODE (and the fixed-step semi-implicit Euler scheme a
+     physics engine would use), replaying identical closed-loop commands.
+     The SpacecraftEnv vs SpacecraftRLEnv+MockTransport comparison is reported
+     separately as transport consistency: both sides run the same simulator,
+     so it checks plumbing, not physics.
 
 Hardware and Gazebo checks are out of scope here and reported as unverified,
 never as passing. Usage:
@@ -27,6 +33,8 @@ from spaceforge_mvp.control.glideslope import glideslope_action
 from spaceforge_mvp.env.spacecraft_env import SpacecraftEnv
 
 SCHEMA_VERSION = 1
+# Keypoint detection noise used for the headline perception number (pixels).
+PIXEL_NOISE_PX = 0.5
 
 # Agreed acceptance gates (shipped training metadata thresholds).
 SUCCESS_THRESHOLD = 0.85
@@ -91,7 +99,8 @@ def run_episodes(level: str, episodes: int, seed: int) -> Dict[str, Any]:
             action = np.asarray(glideslope_action(env.rel_pos, env.rel_vel), dtype=np.float64)
             _, _, terminated, truncated, last_info = env.step(action)
             applied = np.asarray(last_info["applied_action"], dtype=float)
-            ep_dv += float(np.sum(np.abs(applied)))
+            # Physical delta-v (m/s, L1 over axes), not the normalized command sum.
+            ep_dv += float(np.sum(np.abs(np.asarray(last_info["executed_action"], dtype=float)))) * env.physics_config.dt
             ep_overrides += int(last_info.get("safety_override") is not None)
             if not (np.all(np.isfinite(applied)) and np.all(np.abs(applied) <= 1.0 + 1e-9)):
                 violations += 1
@@ -126,7 +135,7 @@ def measure_pose_error(trials: int, seed: int) -> Dict[str, Any]:
     the perception package cannot be imported.
     """
     try:
-        import cv2  # noqa: F401
+        import cv2
         from spaceforge_perception.contracts import CameraCalibration, Detection, TargetKeypoints
         from spaceforge_perception.pnp import OpenCVPnPSolver
     except ImportError as exc:
@@ -137,31 +146,45 @@ def measure_pose_error(trials: int, seed: int) -> Dict[str, Any]:
         ((-0.5, -0.5, 0.0), (0.5, -0.5, 0.0), (0.5, 0.5, 0.0), (-0.5, 0.5, 0.0)),
     )
     calib = CameraCalibration(640, 480, (500, 0, 320, 0, 500, 240, 0, 0, 1), (0, 0, 0, 0, 0))
-    errors: List[float] = []
-    reproj: List[float] = []
-    failures = 0
+    K = np.asarray(calib.K, dtype=float).reshape(3, 3)
+    poses = []
     for _ in range(trials):
-        import cv2 as _cv2
         truth_t = np.array([rng.uniform(-3, 3), rng.uniform(-3, 3), rng.uniform(2, 10)])
         axis = rng.normal(size=3)
         axis = axis / float(np.linalg.norm(axis))
-        rvec, _ = _cv2.Rodrigues((axis * rng.uniform(0, 0.3)).reshape(3, 1))
-        K = np.asarray(calib.K, dtype=float).reshape(3, 3)
-        pixels, _ = _cv2.projectPoints(
+        rvec, _ = cv2.Rodrigues((axis * rng.uniform(0, 0.3)).reshape(3, 1))
+        pixels, _ = cv2.projectPoints(
             np.asarray(keypoints.points_m, dtype=float), rvec, truth_t, K, np.zeros(5))
-        pixels = tuple(map(tuple, pixels.reshape(-1, 2).tolist()))
-        detection = Detection(pixels, (1.0,) * 4, 1.0, 0, calib.camera_frame)
-        pose = OpenCVPnPSolver().solve(keypoints, detection, calib)
-        if "VALID" not in str(pose.status):
-            failures += 1
-            continue
-        errors.append(float(np.linalg.norm(np.asarray(pose.translation_m) - truth_t)))
-        reproj.append(float(pose.reprojection_error_px))
+        poses.append((truth_t, pixels.reshape(-1, 2)))
+
+    def _solve_all(noise_px: float) -> Dict[str, Any]:
+        noise_rng = np.random.default_rng(seed + 1)
+        errors: List[float] = []
+        reproj: List[float] = []
+        failures = 0
+        for truth_t, clean in poses:
+            noisy = clean + noise_rng.normal(0.0, noise_px, size=clean.shape) if noise_px > 0 else clean
+            detection = Detection(tuple(map(tuple, noisy.tolist())), (1.0,) * 4, 1.0, 0, calib.camera_frame)
+            pose = OpenCVPnPSolver().solve(keypoints, detection, calib)
+            if "VALID" not in str(pose.status):
+                failures += 1
+                continue
+            errors.append(float(np.linalg.norm(np.asarray(pose.translation_m) - truth_t)))
+            reproj.append(float(pose.reprojection_error_px))
+        return {
+            "pixel_noise_std_px": noise_px, "failures": failures,
+            "mean_translation_error_m": float(np.mean(errors)) if errors else float("inf"),
+            "p95_translation_error_m": float(np.percentile(errors, 95)) if errors else float("inf"),
+            "max_translation_error_m": float(np.max(errors)) if errors else float("inf"),
+            "mean_reprojection_error_px": float(np.mean(reproj)) if reproj else float("inf"),
+        }
+
+    headline = _solve_all(PIXEL_NOISE_PX)
     return {
-        "status": "measured", "trials": trials, "failures": failures,
-        "mean_translation_error_m": float(np.mean(errors)) if errors else float("inf"),
-        "max_translation_error_m": float(np.max(errors)) if errors else float("inf"),
-        "mean_reprojection_error_px": float(np.mean(reproj)) if reproj else float("inf"),
+        "status": "measured", "trials": trials, **headline,
+        "by_noise": [_solve_all(sigma) for sigma in (0.0, 0.5, 1.0)],
+        "note": ("noise-free projections only check the solver; the headline numbers use "
+                 f"{PIXEL_NOISE_PX} px Gaussian keypoint noise. Detector error is not modelled."),
     }
 
 
@@ -251,8 +274,70 @@ def measure_curriculum() -> Dict[str, Any]:
     }
 
 
-def measure_sim2sim_gap(pairs: int, seed: int) -> Dict[str, Any]:
-    """Paired rollouts: MVP env vs rl_env MockTransport, identical seeds/commands."""
+def _cw_rhs(state: np.ndarray, accel: np.ndarray, n: float) -> np.ndarray:
+    """CW ODE written out independently of spaceforge_mvp.core.cw_dynamics."""
+    x, _, z, vx, vy, vz = state
+    return np.array([vx, vy, vz, 3 * n * n * x + 2 * n * vy + accel[0], -2 * n * vx + accel[1], -n * n * z + accel[2]])
+
+
+def measure_sim2sim_gap(pairs: int, seed: int, sub_dt: float = 0.01, engine_dt: float = 0.1) -> Dict[str, Any]:
+    """Exact-STM environment vs independent integrators on identical commands.
+
+    Each pair flies the glideslope closed loop in SpacecraftEnv, records the
+    executed acceleration per step, and replays that command sequence through
+    (a) classical RK4 at ``sub_dt`` and (b) semi-implicit Euler at
+    ``engine_dt`` (a typical fixed physics-engine step). The peak position
+    divergence from the environment's trajectory is the sim-to-sim gap.
+    """
+    rng = np.random.default_rng(seed)
+    rk4_gaps: List[float] = []
+    euler_gaps: List[float] = []
+    for _ in range(pairs):
+        env = SpacecraftEnv()
+        env.reset(seed=int(rng.integers(0, 2**31 - 1)))
+        n, dt = env.physics_config.n, env.physics_config.dt
+        rk4 = np.concatenate([env.rel_pos, env.rel_vel])
+        euler_p, euler_v = env.rel_pos.copy(), env.rel_vel.copy()
+        peak_rk4 = peak_euler = 0.0
+        for _ in range(env.max_steps):
+            _, _, term, trunc, info = env.step(glideslope_action(env.rel_pos, env.rel_vel))
+            accel = np.asarray(info["executed_action"], dtype=float)
+            h = sub_dt
+            for _ in range(int(round(dt / h))):
+                k1 = _cw_rhs(rk4, accel, n)
+                k2 = _cw_rhs(rk4 + 0.5 * h * k1, accel, n)
+                k3 = _cw_rhs(rk4 + 0.5 * h * k2, accel, n)
+                k4 = _cw_rhs(rk4 + h * k3, accel, n)
+                rk4 = rk4 + h / 6.0 * (k1 + 2 * k2 + 2 * k3 + k4)
+            for _ in range(int(round(dt / engine_dt))):
+                a = _cw_rhs(np.concatenate([euler_p, euler_v]), accel, n)[3:]
+                euler_v = euler_v + a * engine_dt
+                euler_p = euler_p + euler_v * engine_dt
+            peak_rk4 = max(peak_rk4, float(np.linalg.norm(rk4[:3] - env.rel_pos)))
+            peak_euler = max(peak_euler, float(np.linalg.norm(euler_p - env.rel_pos)))
+            if term or trunc:
+                break
+        rk4_gaps.append(peak_rk4)
+        euler_gaps.append(peak_euler)
+    return {
+        "status": "measured", "pairs": pairs,
+        "reference": f"independent RK4 at {sub_dt} s",
+        "max_divergence_m": float(np.max(rk4_gaps)) if rk4_gaps else float("inf"),
+        "mean_divergence_m": float(np.mean(rk4_gaps)) if rk4_gaps else float("inf"),
+        "semi_implicit_euler": {
+            "step_s": engine_dt,
+            "max_divergence_m": float(np.max(euler_gaps)) if euler_gaps else float("inf"),
+            "mean_divergence_m": float(np.mean(euler_gaps)) if euler_gaps else float("inf"),
+        },
+    }
+
+
+def measure_transport_consistency(pairs: int, seed: int) -> Dict[str, Any]:
+    """Paired rollouts: MVP env vs rl_env MockTransport, identical seeds/commands.
+
+    Both sides run SpacecraftEnv, so agreement verifies the transport/plumbing
+    layer only; it is not evidence about physics fidelity.
+    """
     try:
         from spaceforge_rl_env.env import SpacecraftRLEnv
         from spaceforge_rl_env.transport import MockTransport
@@ -319,6 +404,7 @@ def run_matrix(episodes: int = 120, seed: int = 0,
     llm = measure_llm_validity(20, 25, seed)
     curriculum = measure_curriculum()
     sim2sim = measure_sim2sim_gap(20, seed)
+    transport = measure_transport_consistency(20, seed)
     nominal = level_reports.get("nominal", {})
     verdicts = {
         "success_above_threshold": bool(nominal.get("success_rate", 0.0) >= SUCCESS_THRESHOLD),
@@ -336,6 +422,7 @@ def run_matrix(episodes: int = 120, seed: int = 0,
         "llm_validity": llm,
         "curriculum": curriculum,
         "sim2sim_gap": sim2sim,
+        "transport_consistency": transport,
         "thresholds": {
             "min_success_rate": SUCCESS_THRESHOLD,
             "max_avg_fuel_used": FUEL_THRESHOLD,
@@ -359,7 +446,8 @@ def print_report(report: Dict[str, Any]) -> None:
               f"dv {metrics['avg_dv_mps']:.3f}  overrides {metrics['avg_overrides']:.3f}  "
               f"violations {metrics['invariant_violations']}")
     pose = report["pose_error"]
-    print(f"[pose]      {pose.get('status')}: mean {pose.get('mean_translation_error_m')} m, "
+    print(f"[pose]      {pose.get('status')}: {pose.get('pixel_noise_std_px')} px noise -> mean "
+          f"{pose.get('mean_translation_error_m')} m, p95 {pose.get('p95_translation_error_m')} m, "
           f"max {pose.get('max_translation_error_m')} m over {pose.get('trials')} trials")
     llm = report["llm_validity"]
     print(f"[llm]       {llm.get('status')}: valid {llm.get('valid_rate')}  "
@@ -368,8 +456,12 @@ def print_report(report: Dict[str, Any]) -> None:
     print(f"[curriculum] {cur.get('status')}: advance-in-50 {cur.get('perfect_stream_advances_in_50')}  "
           f"rollback {cur.get('poor_stream_rolls_back')}")
     gap = report["sim2sim_gap"]
-    print(f"[sim2sim]   {gap.get('status')}: max div {gap.get('max_divergence_m')} m, "
-          f"agreement {gap.get('success_agreement_rate')}")
+    euler = gap.get("semi_implicit_euler", {})
+    print(f"[sim2sim]   {gap.get('status')}: vs {gap.get('reference')} max div {gap.get('max_divergence_m')} m; "
+          f"vs semi-implicit Euler @{euler.get('step_s')} s max div {euler.get('max_divergence_m')} m")
+    tc = report["transport_consistency"]
+    print(f"[transport] {tc.get('status')}: max div {tc.get('max_divergence_m')} m, "
+          f"agreement {tc.get('success_agreement_rate')} (same simulator both sides)")
     print(f"[verdicts]  {json.dumps(report['verdicts'])}")
     print(f"[unverified] {'; '.join(report['unverified'])}")
 

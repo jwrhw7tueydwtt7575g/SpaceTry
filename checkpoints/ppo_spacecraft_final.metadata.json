@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "checkpoint": "checkpoints/ppo_spacecraft_final.zip",
+  "training_command": "python -m spaceforge_mvp.training.train --total_timesteps 300000 --save_freq 50000 --seed 1",
+  "selected_snapshot": "ppo_spacecraft_50000_steps (periodic checkpoint at 50k of a 300k-step run)",
+  "selection_rule": "highest deterministic success on held-out seeds 1000-1099, disjoint from the reporting seeds",
+  "environment": "SpacecraftEnv defaults: uniform 20 m / 5 mm/s resets, safety v1, max_cmd_accel 0.1 m/s^2, dt 1 s, 300 steps",
+  "ppo": {"batch_size": 64, "gamma": 0.99, "n_steps": 512, "policy": "MlpPolicy"},
+  "held_out_selection_success_by_snapshot": {
+    "50k": 1.00, "100k": 0.58, "150k": 0.31, "200k": 0.01, "250k": 0.86, "300k": 0.98,
+    "final": 0.86, "eval_callback_best": 0.93
+  },
+  "reported_results": {
+    "run_eval_seeds_42_91": {"success_rate": 1.0, "avg_fuel_used": 0.0241, "avg_episode_length": 205.84, "safety_overrides": 3, "acceptance_passed": true, "beats_glideslope_baseline": false},
+    "fresh_seeds_5000_5499": {"v1": "500/500 docked, 0 collisions", "v2": "500/500 docked, 0 collisions", "off": "500/500 docked, 0 collisions"}
+  },
+  "known_limitations": [
+    "Training is unstable: held-out success swings between 1% and 100% across snapshots of one run.",
+    "Slower and less fuel-efficient than the glideslope baseline (fuel 0.024 vs 0.014 of the tank).",
+    "Trained and validated only on the nominal domain (no randomization or faults)."
+  ],
+  "acceptance_thresholds": {"min_success_rate": 0.85, "max_avg_fuel_used": 0.35, "max_safety_overrides_per_episode": 1.0}
+}

@@ -25,7 +25,7 @@ from typing import Callable, Optional
 
 import numpy as np
 
-from spaceforge_mvp.config import PHYSICS_CONFIG
+from spaceforge_mvp.config import ACTUATOR_CONFIG, PHYSICS_CONFIG
 from spaceforge_mvp.core.cw_dynamics import cw_accel
 
 
@@ -38,7 +38,7 @@ def glideslope_action(
     cw_compensation: bool = True,
     n: float = PHYSICS_CONFIG.n,
     dt: float = PHYSICS_CONFIG.dt,
-    max_accel: float = 1.0,
+    max_accel: float = ACTUATOR_CONFIG.max_cmd_accel,
     braking_margin: float = 0.5,
 ) -> np.ndarray:
     """Return the normalized command for a safe approach (1.0 == ``max_accel`` m/s^2).

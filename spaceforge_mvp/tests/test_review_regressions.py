@@ -119,3 +119,22 @@ def test_dashboard_builds(tmp_path, monkeypatch):
     out = dashboard.build()
     html = Path(out).read_text()
     assert "<html" in html.lower() and len(html) > 10_000
+
+
+# ---------------------------------------------------------------- shipped policy
+def test_shipped_checkpoint_docks():
+    """The released PPO checkpoint must dock (the previous one scored 0/50)."""
+    from stable_baselines3 import PPO
+
+    model = PPO.load(str(Path(__file__).resolve().parents[2] / "checkpoints" / "ppo_spacecraft_final.zip"))
+    env = SpacecraftEnv()
+    successes = collisions = 0
+    for seed in range(7000, 7010):
+        obs, _ = env.reset(seed=seed)
+        while True:
+            obs, _, terminated, truncated, info = env.step(model.predict(obs, deterministic=True)[0])
+            if terminated or truncated:
+                break
+        successes += int(info["is_success"])
+        collisions += int(info["collision"])
+    assert successes >= 9 and collisions == 0

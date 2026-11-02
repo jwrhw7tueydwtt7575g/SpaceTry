@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 
-from spaceforge_mvp.config import ControllerConfig, MissionConfig, PhysicsConfig, RunConfig
+from spaceforge_mvp.config import ActuatorConfig, ControllerConfig, MissionConfig, PhysicsConfig, RunConfig
 from spaceforge_mvp.control.glideslope import glideslope_controller, hot_approach_action
 from spaceforge_mvp.viz.record import record_episode, rl_controller
 
@@ -38,6 +38,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dt", type=float, required=True, help="Simulation step in seconds")
     parser.add_argument("--mean-motion", type=float, required=True, help="CW mean motion in rad/s")
     parser.add_argument("--safety", choices=("off", "v1", "v2"), required=True)
+    parser.add_argument("--max-accel", type=float, default=ActuatorConfig().max_cmd_accel,
+                        help="Actuator authority in m/s^2 per unit command (default: %(default)s)")
     parser.add_argument("--goal", default="APPROACH", help="Mission safety goal type")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -57,6 +59,9 @@ def run(args: argparse.Namespace) -> dict:
         raise ValueError("--fuel must be between 0 and 1")
     if args.duration <= 0 or args.dt <= 0 or args.mean_motion <= 0:
         raise ValueError("--duration, --dt, and --mean-motion must be positive")
+    max_accel = float(getattr(args, "max_accel", ActuatorConfig().max_cmd_accel))
+    if not max_accel > 0:
+        raise ValueError("--max-accel must be positive")
 
     mission = MissionConfig(
         start_pos=_vec(args.start_pos, "--start-pos"),
@@ -74,6 +79,7 @@ def run(args: argparse.Namespace) -> dict:
     run_config = RunConfig(
         mission=mission,
         physics=PhysicsConfig(n=mission.mean_motion, dt=mission.dt),
+        actuator=ActuatorConfig(max_cmd_accel=max_accel),
         controller=ControllerConfig(
             name=args.controller, checkpoint=args.checkpoint, deterministic=not args.nondeterministic
         ),
