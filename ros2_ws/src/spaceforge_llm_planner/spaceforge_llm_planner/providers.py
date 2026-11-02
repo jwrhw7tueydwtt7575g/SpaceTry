@@ -45,19 +45,54 @@ class OfflineMockProvider:
             cost_usd = self.default_cost
         return ProviderResponse(payload, int(input_tokens), int(output_tokens), float(cost_usd), provider="offline_mock")
 
+def _usage_cost(input_tokens, output_tokens, input_usd_per_1k, output_usd_per_1k):
+    """Cost from token usage and the configured per-1k-token prices."""
+    return (int(input_tokens) * float(input_usd_per_1k) + int(output_tokens) * float(output_usd_per_1k)) / 1000.0
+
+
+def _tool_call_payload(message):
+    """Extract a JSON payload from an OpenAI-style tool call, if present.
+
+    With tool calling, ``content`` is present but null and the proposal lives
+    in ``tool_calls[0].function.arguments`` (a JSON string).
+    """
+    calls = message.get("tool_calls") or []
+    if not calls:
+        return None
+    function = (calls[0] or {}).get("function", {}) if isinstance(calls[0], dict) else {}
+    arguments = function.get("arguments")
+    if isinstance(arguments, str):
+        try:
+            return json.loads(arguments)
+        except json.JSONDecodeError:
+            return arguments
+    return arguments
+
+
 class OpenAICompatibleProvider:
-    """Lazy standard HTTP adapter; construction does not perform network I/O."""
-    def __init__(self, endpoint, model, api_key=""):
+    """Lazy standard HTTP adapter; construction does not perform network I/O.
+
+    Set ``input_usd_per_1k`` / ``output_usd_per_1k`` to the model's prices so
+    the planner's cost limit is enforced on real spend; with the default 0.0
+    prices the cost limit cannot trigger and only the token limit applies.
+    """
+    def __init__(self, endpoint, model, api_key="", input_usd_per_1k=0.0, output_usd_per_1k=0.0):
         self.endpoint = endpoint; self.model = model; self.api_key = api_key
+        self.input_usd_per_1k = float(input_usd_per_1k); self.output_usd_per_1k = float(output_usd_per_1k)
 
     def complete(self, prompt, tools, timeout_s, token_limit, cost_limit_usd):
         body = json.dumps({"model": self.model, "messages": [{"role": "user", "content": prompt}], "tools": tools, "max_tokens": token_limit}).encode()
         request = urllib.request.Request(self.endpoint, data=body, headers={"Content-Type": "application/json", **({"Authorization": "Bearer " + self.api_key} if self.api_key else {})})
         with urllib.request.urlopen(request, timeout=timeout_s) as response:
             payload = json.loads(response.read().decode())
-        choice = payload["choices"][0]["message"].get("content", payload["choices"][0]["message"] .get("tool_calls"))
+        message = payload["choices"][0]["message"]
+        choice = message.get("content")
+        if choice is None:
+            choice = _tool_call_payload(message)
         usage = payload.get("usage", {})
-        return ProviderResponse(choice, int(usage.get("prompt_tokens", 0)), int(usage.get("completion_tokens", 0)), 0.0, "openai_compatible")
+        input_tokens = int(usage.get("prompt_tokens", 0)); output_tokens = int(usage.get("completion_tokens", 0))
+        cost = _usage_cost(input_tokens, output_tokens, self.input_usd_per_1k, self.output_usd_per_1k)
+        return ProviderResponse(choice, input_tokens, output_tokens, cost, "openai_compatible")
 
 
 class GeminiProvider:
@@ -71,10 +106,12 @@ class GeminiProvider:
 
     ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models"
 
-    def __init__(self, api_key="", model="gemini-3.8-flash"):
+    def __init__(self, api_key="", model="gemini-3.8-flash", input_usd_per_1k=0.0, output_usd_per_1k=0.0):
         self.api_key = api_key
         self.model = model
         self.calls = 0
+        self.input_usd_per_1k = float(input_usd_per_1k)
+        self.output_usd_per_1k = float(output_usd_per_1k)
 
     def _url(self):
         # Key stays in the URL (Google's convention); never logged or traced.
@@ -106,10 +143,10 @@ class GeminiProvider:
         parts = ((candidates[0].get("content", {}) if candidates else {}).get("parts", []))
         text = "".join(str(part.get("text", "")) for part in parts if isinstance(part, dict))
         usage = payload.get("usageMetadata", {})
+        input_tokens = int(usage.get("promptTokenCount", 0))
+        output_tokens = int(usage.get("candidatesTokenCount", 0))
         return ProviderResponse(
-            text,
-            int(usage.get("promptTokenCount", 0)),
-            int(usage.get("candidatesTokenCount", 0)),
-            0.0,  # server-side pricing varies; planner enforces count/cost bounds instead
+            text, input_tokens, output_tokens,
+            _usage_cost(input_tokens, output_tokens, self.input_usd_per_1k, self.output_usd_per_1k),
             "gemini",
         )

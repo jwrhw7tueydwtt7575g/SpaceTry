@@ -33,10 +33,16 @@ class ConstraintConfig:
     max_torque_nm: Tuple[float, float, float] = (1.0, 1.0, 1.0)
     max_goal_timeout_s: float = 300.0
     stale_telemetry_timeout_s: float = 0.25
+    # Vehicle model used to size braking and predict one control period ahead:
+    # a braking force is never larger than what cancels the velocity within
+    # one period, so the boundary cannot over-brake a vehicle into reverse.
+    vehicle_mass_kg: float = 1.0
+    control_period_s: float = 1.0
 
     def __post_init__(self):
         if not 0 <= self.fuel_floor <= 1 or min(self.keep_out_radius_m, self.max_closing_speed_mps, self.max_goal_timeout_s, self.stale_telemetry_timeout_s) <= 0: raise ValueError("invalid safety constraints")
         if any(v <= 0 for v in self.max_force_n + self.max_torque_nm): raise ValueError("actuator limits must be positive")
+        if self.vehicle_mass_kg <= 0 or self.control_period_s <= 0: raise ValueError("vehicle mass and control period must be positive")
 
 @dataclass(frozen=True)
 class GoalSpec:

@@ -9,7 +9,7 @@ from spaceforge_mission_ctrl import (
     ActuatorCommand, ConstraintConfig, GoalSpec, GoalType, MissionController,
     ReasonCode, Telemetry, validate_goal,
 )
-from spaceforge_mission_ctrl.filtering import _brake
+from spaceforge_mission_ctrl.filtering import _brake, closing_unsafe
 from spaceforge_mission_ctrl.node import parse_goal_json
 from spaceforge_mission_ctrl.ros_messages import command_payload, to_ros_event, to_ros_wrench
 
@@ -85,13 +85,64 @@ def test_hostile_command_never_leaks_through():
     assert event is not None and event.reason_code == ReasonCode.INVALID_VECTOR.value
 
 
+CLOSING_FAST = dict(position_m=(3.0, 0.0, 0.0), velocity_mps=(-0.6, 0.0, 0.0))
+
+
 def test_keep_out_veto_substitutes_braking_not_zero():
     ctrl = MissionController()
-    tele = fresh_telemetry(position_m=(3.0, 0.0, 0.0), velocity_mps=(1.0, 0.0, 0.0))
-    result, _ = ctrl.step(fresh_goal(), tele, ActuatorCommand((1.0, 0.0, 0.0), (0.0, 0.0, 0.0)), NOW)
+    tele = fresh_telemetry(**CLOSING_FAST)
+    result, _ = ctrl.step(fresh_goal(), tele, ActuatorCommand((-1.0, 0.0, 0.0), (0.0, 0.0, 0.0)), NOW)
     assert result.code is ReasonCode.CLOSING_SPEED_EXCEEDED and result.override
     applied = np.asarray(result.applied.force_n)
     assert float(np.dot(applied, tele.velocity_mps)) < 0.0  # braking, not coasting
+    assert applied[0] > 0.0 and applied[0] <= 0.6 + 1e-12  # away from target, sized: no reversal
+
+
+@pytest.mark.parametrize("command", [(0.0, 0.0, 0.0), (0.0, 1.0, 1.0)])
+def test_coasting_or_lateral_thrust_inside_keep_out_is_braked(command):
+    result, _ = MissionController().step(fresh_goal(), fresh_telemetry(**CLOSING_FAST),
+                                         ActuatorCommand(command, (0.0, 0.0, 0.0)), NOW)
+    assert result.code is ReasonCode.CLOSING_SPEED_EXCEEDED and result.applied.force_n[0] > 0.0
+
+
+def test_retreating_vehicle_is_not_braked_toward_the_target():
+    tele = fresh_telemetry(position_m=(3.0, 0.0, 0.0), velocity_mps=(0.6, 0.0, 0.0))
+    result, _ = MissionController().step(fresh_goal("RETREAT"), tele, ActuatorCommand((1.0, 0.0, 0.0), (0.0, 0.0, 0.0)), NOW)
+    assert not result.override and result.applied.force_n == (1.0, 0.0, 0.0)
+
+
+def test_clipping_is_not_a_way_around_the_keep_out_rule():
+    result, _ = MissionController().step(fresh_goal(), fresh_telemetry(**CLOSING_FAST),
+                                         ActuatorCommand((-4.0, 0.0, 0.0), (0.0, 0.0, 0.0)), NOW)
+    assert result.code is ReasonCode.CLOSING_SPEED_EXCEEDED and result.applied.force_n[0] > 0.0
+
+
+@pytest.mark.parametrize("goal", [
+    GoalSpec(GoalType.APPROACH, timeout_s=400.0),
+    GoalSpec(GoalType.APPROACH, max_force_n=(2.0, 1.0, 1.0)),
+    GoalSpec(GoalType.SAFE_HOLD),
+])
+def test_rejected_or_hold_goal_never_coasts_into_the_target(goal):
+    result, _ = MissionController().step(goal, fresh_telemetry(**CLOSING_FAST),
+                                         ActuatorCommand((0.0, 0.0, 0.0), (0.0, 0.0, 0.0)), NOW)
+    assert result.override and result.applied.force_n[0] > 0.0
+
+
+def test_fuel_floor_brakes_from_reserve_when_closing_fast():
+    result, _ = MissionController().step(fresh_goal(), fresh_telemetry(fuel_fraction=0.01, **CLOSING_FAST),
+                                         ActuatorCommand((0.0, 0.0, 0.0), (0.0, 0.0, 0.0)), NOW)
+    assert result.code is ReasonCode.FUEL_BELOW_FLOOR and result.applied.force_n[0] > 0.0
+
+
+def test_future_stamped_telemetry_is_rejected():
+    result = validate_goal(fresh_goal(), ConstraintConfig(), fresh_telemetry(stamp_ns=NOW + 3_600_000_000_000), NOW)
+    assert result.code is ReasonCode.STALE_TELEMETRY
+
+
+def test_command_that_would_breach_the_limit_is_held():
+    tele = fresh_telemetry(position_m=(3.0, 0.0, 0.0), velocity_mps=(-0.1, 0.0, 0.0))
+    result, _ = MissionController().step(fresh_goal(), tele, ActuatorCommand((-1.0, 0.0, 0.0), (0.0, 0.0, 0.0)), NOW)
+    assert result.code is ReasonCode.CLOSING_SPEED_EXCEEDED and result.applied.force_n == (0.0, 0.0, 0.0)
 
 
 # ---------------------------------------------------------- RTA reuse + invariants
@@ -129,8 +180,15 @@ def test_safety_invariants_over_hostile_space():
         assert np.all(np.abs(applied_f) <= limits + 1e-12)
         assert (not result.override) or (event is not None)
         if fuel < 0.05 and 0.0 <= fuel <= 1.0 and stamp == NOW:
-            # Fresh telemetry below the floor: fuel priority beats everything.
-            assert result.applied == ActuatorCommand((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
+            # Fresh telemetry below the floor: no discretionary thrust -- but a
+            # vehicle closing fast inside keep-out is still braked from reserve.
+            if closing_unsafe(tele, ConstraintConfig()):
+                assert float(np.dot(applied_f, vel)) < 0.0
+            else:
+                assert result.applied == ActuatorCommand((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
+        if closing_unsafe(tele, ConstraintConfig()) and 0.0 <= fuel <= 1.0:
+            # Invariant: never accelerate a fast-closing vehicle toward the target.
+            assert float(np.dot(applied_f, np.asarray(pos) / np.linalg.norm(pos))) >= -1e-12
         # Determinism: same inputs, same verdict and output (event ids excluded).
         again, _ = MissionController().step(goal, tele, ActuatorCommand(force, (0.0, 0.0, 0.0)), NOW)
         assert (again.code, again.override, again.applied) == (result.code, result.override, result.applied)
