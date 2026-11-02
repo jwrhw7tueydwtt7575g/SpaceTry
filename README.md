@@ -2,13 +2,15 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests](https://img.shields.io/badge/tests-64%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-84%20MVP%20%2B%20170%20ROS-brightgreen.svg)]()
 
 > **Status** — `MVP_SUMMARY.md` is the source of truth for what works and what does not.
-> The shipped PPO checkpoint scores **0 successes in 50 episodes**. The certified Glideslope
-> baseline docks **200/200 seeds**. `ros2_ws/` holds an optional Phase-1 ROS 2 / Gazebo /
-> YOLOv8 / LangChain integration (7 packages, contract-first) that needs ROS 2 Humble +
-> Gazebo Harmonic to validate — it does not replace the pure-Python MVP below.
+> The shipped PPO checkpoint docks in **100% of `run_eval`'s 50 seeds and 500/500 fresh seeds**
+> (zero collisions), though it is slower and less fuel-efficient than the certified glideslope
+> baseline, which docks **200/200 seeds**. The predictive runtime-assurance filter (v2) turns a
+> reckless full-thrust slam into a soft capture. `ros2_ws/` holds the ROS 2 / Gazebo / perception /
+> LLM integration (7 Python packages + a C++ Gazebo plugin); it builds and its 170 tests pass in a
+> ROS 2 Humble + Gazebo Harmonic environment matching the `ros` CI job.
 
 **SpaceForge** is a simulation-first testbed for autonomous spacecraft rendezvous, proximity operations,
 and docking (RPO/Docking). It combines orbital relative dynamics, continuous reinforcement learning (PPO),
@@ -36,7 +38,8 @@ spaceforgemvp/
 ├── pyproject.toml                 ← PEP 517 build config (pip install -e .)
 ├── requirements.txt               ← Pinned dependencies
 ├── checkpoints/
-│   └── ppo_spacecraft_final.zip  ← Pre-trained PPO checkpoint (0% success — known issue)
+│   ├── ppo_spacecraft_final.zip  ← Pre-trained PPO checkpoint (docks; see metadata)
+│   └── ppo_spacecraft_final.metadata.json ← Provenance, selection rule, measured results
 └── spaceforge_mvp/
     ├── config.py                  ← PhysicsConfig, SafetyConfig, EnvConfig, MissionConfig
     ├── simulate.py                ← CLI mission orchestrator (main entry point)
@@ -48,7 +51,7 @@ spaceforgemvp/
     │   └── mission_safety.py      ← Safety interlock v1 (zeroing veto)
     ├── control/
     │   ├── glideslope.py          ← Certified guidance law (200/200 dockings)
-    │   └── rta.py                 ← Runtime Assurance v2 (active braking override)
+    │   └── rta.py                 ← Runtime Assurance v2 (predictive filter + certified backup)
     ├── training/
     │   └── train.py               ← SB3 PPO training pipeline
     ├── eval/
@@ -61,7 +64,7 @@ spaceforgemvp/
     │   ├── make_videos.py         ← Video compilation (3 acts + film)
     │   ├── dashboard.py           ← Standalone interactive HTML dashboard
     │   └── dashboard.html         ← Generated artifact (open in any browser)
-    └── tests/                     ← 40 automated tests (all passing)
+    └── tests/                     ← 84 automated tests (all passing)
         ├── test_cw_dynamics.py
         ├── test_spacecraft_env.py
         ├── test_mission_safety.py
@@ -77,14 +80,14 @@ spaceforgemvp/
 
 | Folder / File | What it contains | Simple Description |
 |---|---|---|
-| 📁 `core/` | [`cw_dynamics.py`](file:///home/vivek/Desktop/SpaceForge/spaceforgemvp/spaceforge_mvp/core/cw_dynamics.py) | **Physics Engine:** Math for orbital motion (Clohessy-Wiltshire relative dynamics & state matrix). |
-| 📁 `env/` | [`spacecraft_env.py`](file:///home/vivek/Desktop/SpaceForge/spaceforgemvp/spaceforge_mvp/env/spacecraft_env.py) | **Gym Environment:** 10D sensor inputs, 3D thrusters, docking reward calculations. |
-| 📁 `safety/` | [`mission_safety.py`](file:///home/vivek/Desktop/SpaceForge/spaceforgemvp/spaceforge_mvp/safety/mission_safety.py) | **Safety Interlock (v1):** Basic safety rules (fuel floor check & proximity speed veto). |
-| 📁 `control/` | [`glideslope.py`](file:///home/vivek/Desktop/SpaceForge/spaceforgemvp/spaceforge_mvp/control/glideslope.py), [`rta.py`](file:///home/vivek/Desktop/SpaceForge/spaceforgemvp/spaceforge_mvp/control/rta.py) | **Controllers & Filters:** Certified Glideslope guidance law + v2 active-braking safety filter. |
-| 📁 `training/` | [`train.py`](file:///home/vivek/Desktop/SpaceForge/spaceforgemvp/spaceforge_mvp/training/train.py) | **AI Training:** Script to train PPO reinforcement learning models with Stable-Baselines3. |
-| 📁 `eval/` | [`run_eval.py`](file:///home/vivek/Desktop/SpaceForge/spaceforgemvp/spaceforge_mvp/eval/run_eval.py), [`plot_trajectory.py`](file:///home/vivek/Desktop/SpaceForge/spaceforgemvp/spaceforge_mvp/eval/plot_trajectory.py) | **Evaluation & 2D Plots:** Multi-episode metrics benchmark and trajectory PNG image generator. |
+| 📁 `core/` | [`cw_dynamics.py`](spaceforge_mvp/core/cw_dynamics.py) | **Physics Engine:** Math for orbital motion (Clohessy-Wiltshire relative dynamics & state matrix). |
+| 📁 `env/` | [`spacecraft_env.py`](spaceforge_mvp/env/spacecraft_env.py) | **Gym Environment:** 10D sensor inputs, 3D thrusters, docking reward calculations. |
+| 📁 `safety/` | [`mission_safety.py`](spaceforge_mvp/safety/mission_safety.py) | **Safety Interlock (v1):** Basic safety rules (fuel floor check & proximity speed veto). |
+| 📁 `control/` | [`glideslope.py`](spaceforge_mvp/control/glideslope.py), [`rta.py`](spaceforge_mvp/control/rta.py) | **Controllers & Filters:** Certified Glideslope guidance law + v2 predictive runtime-assurance filter. |
+| 📁 `training/` | [`train.py`](spaceforge_mvp/training/train.py) | **AI Training:** Script to train PPO reinforcement learning models with Stable-Baselines3. |
+| 📁 `eval/` | [`run_eval.py`](spaceforge_mvp/eval/run_eval.py), [`plot_trajectory.py`](spaceforge_mvp/eval/plot_trajectory.py) | **Evaluation & 2D Plots:** Multi-episode metrics benchmark and trajectory PNG image generator. |
 | 📁 `viz/` | `record.py`, `dashboard.py`, `render.py`, `make_videos.py` | **Visuals & Telemetry:** Generates interactive HTML dashboard and broadcast MP4 videos. |
-| 📁 `tests/` | 12 test files | **Test Suite:** 40 automated unit & integration tests verifying math, env, and CLI. |
+| 📁 `tests/` | 15 test files | **Test Suite:** 84 automated unit, integration and regression tests (math, env, safety, CLI, viz, shipped policy). |
 | 📁 `checkpoints/` | `ppo_spacecraft_final.zip` | **Model Weights:** Saved PPO reinforcement learning policy checkpoints. |
 | 📁 `runs/` | `mission.json`, `telemetry.json`, `metrics.json` | **Output Results:** Saved telemetry logs and metrics from simulation runs. |
 | 📄 `simulate.py` | CLI Entrypoint | **Main Simulator:** Single command to run missions with custom positions, fuel, and controllers. |
@@ -108,7 +111,7 @@ flowchart TD
 
     subgraph S_SAFETY ["Safety Assurance Layer"]
         C1["mission_safety.py\nv1 — zeroing veto"]
-        C2["rta.py\nv2 — active braking"]
+        C2["rta.py\nv2 — predictive RTA"]
     end
 
     subgraph S_CTRL ["Controller Layer"]
@@ -143,18 +146,18 @@ flowchart TD
 
 | Module | Lines | What it does |
 |---|---|---|
-| `config.py` | 82 | `MissionConfig` dataclass: positions, velocities, fuel, dt, safety mode. Derives `relative_pos` / `relative_vel`. |
-| `simulate.py` | 120 | CLI entry point. All mission values are required flags. Writes `mission.json`, `telemetry.json`, `metrics.json`. |
-| `core/cw_dynamics.py` | 136 | Exact 6×6 CW STM: `X(k+1) = Φ(dt)·X(k) + Γ(dt)·u`. No numerical integrator. |
-| `env/spacecraft_env.py` | 247 | 10-D obs, 3-D continuous action, safety interlock wired in. Accepts injected `MissionConfig` — no hardcoded positions. |
-| `safety/mission_safety.py` | 90 | Interlock v1: fuel floor → emergency hold; inside 5 m at speed > 0.2 m/s → zero thrust. |
-| `control/glideslope.py` | 87 | Exponential range decay + CW feed-forward cancellation. 200/200 dockings, 0 interlock fires. |
-| `control/rta.py` | 97 | Interlock v2: replaces veto with maximum braking (`u · v ≤ 0`). Turns reckless slam → soft dock in 8 s. |
-| `viz/record.py` | 220 | Rolls out episode via `SpacecraftEnv`, returns JSON trace (pos, vel, cmd, applied, fuel, overrides). |
-| `viz/dashboard.py` | 497 | Self-contained HTML replay: play/pause, frame step, speed control, log-scale range chart. |
-| `viz/render.py` | 638 | Broadcast-grade MP4: HUD, thrust decomposition, range strip, title/result cards. |
-| `training/train.py` | 206 | SB3 PPO pipeline. Accepts optional `MissionConfig` for fixed-state training runs. |
-| `eval/validation_matrix.py` | — | Phase 6 matrix: 120+ episodes × domain levels, pose/LLM/curriculum/sim2sim probes, JSON report. |
+| `config.py` | 385 | Typed frozen configs: physics, actuator (0.1 m/s^2 per unit command), safety envelope, reward, reset, domain, faults, `MissionConfig`, `RunConfig` (JSON round trip). |
+| `simulate.py` | 124 | CLI entry point. All mission values are required flags. Writes `mission.json`, `telemetry.json`, `metrics.json`. |
+| `core/cw_dynamics.py` | 136 | Exact 6×6 CW STM: `X(k+1) = Φ(dt)·X(k) + Γ(dt)·u`. No numerical integrator; matches an independent RK4 to ~1e-11 m. |
+| `env/spacecraft_env.py` | 415 | 10-D obs, 3-D continuous action, safety filter wired in, collision termination (swept capture-sphere test), fault/domain injection. |
+| `safety/mission_safety.py` | 195 | Interlock v1 (geometric speed gate; only genuine braking passes) and the closing-speed envelope shared with v2. |
+| `control/glideslope.py` | 116 | Exponential range decay + CW feed-forward at the mission's mean motion; dt- and authority-aware. 200/200 dockings, 0 interlock fires. |
+| `control/rta.py` | 179 | Interlock v2: predictive envelope check; unsafe commands are replaced by the certified glideslope (Simplex) or a speed-sized brake. |
+| `viz/record.py` | 274 | Rolls out an episode via `SpacecraftEnv`, honours every episode end, returns a JSON trace (pos, vel, cmd, applied, executed, fuel, overrides). |
+| `viz/dashboard.py` | 509 | Self-contained HTML replay: play/pause, frame step, speed control, log-scale range chart; captions computed from the traces. |
+| `viz/render.py` | 637 | Broadcast-grade MP4: HUD, thrust decomposition, range strip, title/result cards. |
+| `training/train.py` | 245 | SB3 PPO pipeline. Accepts optional `MissionConfig` for fixed-state training runs. |
+| `eval/validation_matrix.py` | 493 | Phase 6 matrix: 120 episodes × domain levels; pose error under pixel noise, LLM containment, curriculum, sim-to-sim vs independent RK4; JSON report. |
 | `config.py: DomainConfig/FaultConfig` | — | Mass/inertia, thrust & camera/IMU noise, fuel spread, stuck/bias/dropout/freeze/leak faults. Identity by default. |
 
 ---
@@ -179,11 +182,14 @@ Target is NOT required to be at origin.
 
 **Safety mode choices:**
 
-| `--safety` | Behaviour when inside 5 m at speed > 0.2 m/s |
+| `--safety` | Behaviour |
 |---|---|
 | `off` | No interlock — counterfactual baseline |
-| `v1` | Zero thrust (chaser coasts — still a collision) |
-| `v2` | Substitute maximum braking — prevents collision |
+| `v1` | Veto only: inside 5 m above 0.2 m/s, any command that is not genuine braking is zeroed (the chaser coasts — can still collide) |
+| `v2` | Predictive RTA: each step is checked against a closing-speed envelope (0.2 m/s at 5 m tapering to 0.05 m/s); unsafe commands are replaced by the certified glideslope or a speed-sized brake. Still brakes below the fuel floor. |
+
+The proximity rule applies to every `--goal` by default; a goal label cannot switch it off.
+`--max-accel` sets the actuator authority (m/s^2 per unit command, default 0.1).
 
 ---
 
@@ -202,7 +208,7 @@ pip install -e .
 Verify installation:
 
 ```bash
-python3 -m pytest spaceforge_mvp/tests -q        # 64 passed
+python3 -m pytest spaceforge_mvp/tests -q        # 84 passed
 ```
 
 ---
@@ -286,8 +292,8 @@ Every `simulate` run writes three files to `--output-dir`:
 | File | Contents |
 |---|---|
 | `mission.json` | Resolved CLI inputs: start/target positions, relative state, fuel, dt, safety mode, seed |
-| `telemetry.json` | Per-step frames: `t`, `pos`, `vel`, `cmd`, `applied`, `override`, `dist`, `speed`, `fuel`, `dv` |
-| `metrics.json` | Summary: `success`, `steps`, `start_dist`, `end_dist`, `end_speed`, `fuel_used`, `dv`, `overrides` |
+| `telemetry.json` | Per-step frames: `t`, `pos`, `vel`, `cmd`, `applied`, `executed` (m/s^2 actually delivered), `override`, `dist`, `speed`, `fuel`, `dv` |
+| `metrics.json` | Summary: `success`, `steps`, `start_dist`, `end_dist`, `end_speed`, `fuel_used`, `dv` (m/s), `overrides`, `terminal_reason` (docked / collision / fuel / out_of_bounds / timeout) |
 
 ---
 
@@ -295,8 +301,9 @@ Every `simulate` run writes three files to `--output-dir`:
 
 The production system is a 5-layer robotics stack. The Phase-1 ROS 2 packages already
 exist under `ros2_ws/src/` (gazebo, rl_env, rl_trainer, mission_ctrl, perception,
-llm_planner, auto_trainer) but require ROS 2 Humble + Gazebo Harmonic to run; the
-pure-Python MVP below remains the validated reference oracle.
+llm_planner, auto_trainer). They require ROS 2 Humble + Gazebo Harmonic to run live; the
+pure-Python MVP remains the reference oracle. Launch headless with
+`ros2 launch spaceforge_gazebo leo_orbit.launch.py headless:=true`.
 
 ```mermaid
 flowchart TD
@@ -333,15 +340,16 @@ flowchart TD
 
 | Phase | What | Status |
 |---|---|---|
-| **Done** | Physics engine, Gym env, CLI simulator, glideslope baseline, v2 RTA, telemetry recorder, dashboard, videos, 64 tests | ✅ |
-| **Done** | CI: Python + frontend + lint workflows green; ROS/colcon/C++ workflow provided | ✅ |
-| **Done** | Independent RK4 reference test for CW STM correctness | ✅ |
-| **Next** | Redesign RL reward (add boundary penalty, tie effort to fuel) and retrain | ⬜ |
-| **Next** | Wire v2 RTA into `spacecraft_env.py` as the default interlock | ⬜ |
-| **Phase 1 (unverified here)** | Gazebo Harmonic plugin + ROS 2 middleware nodes exist in `ros2_ws` | 🟡 |
-| **Phase 1 (unverified here)** | YOLOv8 + solvePnP perception layer exists in `ros2_ws` | 🟡 |
-| **Phase 1 (unverified here)** | LLM mission planner exists in `ros2_ws` (+ offline default) | 🟡 |
-| **Phase 1 (unverified here)** | Optuna HPO curriculum manager exists in `ros2_ws` | 🟡 |
+| **Done** | Physics engine, Gym env, CLI simulator, glideslope baseline, predictive v2 RTA, telemetry recorder, dashboard, videos | ✅ |
+| **Done** | Independent RK4 reference for the CW STM; regression tests for every review finding | ✅ |
+| **Done** | PPO that docks (realistic actuator authority, held-out checkpoint selection) | ✅ |
+| **Done** | ROS 2 / Gazebo workspace builds; plugin + bridge + live integration test pass in the `ros` CI job | ✅ |
+| **Next** | Stabilize RL training; beat the glideslope on time or fuel | ⬜ |
+| **Next** | Train/validate the policy under domain randomization and faults | ⬜ |
+| **Next** | Closed-loop docking run inside Gazebo | ⬜ |
+| **Phase 1** | YOLOv8 + solvePnP perception (pose error 3.7 cm mean at 0.5 px keypoint noise) | 🟡 |
+| **Phase 1** | LLM mission planner (+ offline default) behind the deterministic mission_ctrl boundary | 🟡 |
+| **Phase 1** | Optuna HPO curriculum manager | 🟡 |
 
 ---
 

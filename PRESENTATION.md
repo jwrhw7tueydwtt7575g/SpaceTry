@@ -51,7 +51,7 @@ Autonomous Rendezvous, Proximity Operations, and Docking (RPO/Docking) represent
 3. **Design a Certified Classical Reference Controller:** Construct an analytical Glideslope guidance law with feedforward drift cancellation achieving 100% docking convergence across randomized seeds.
 4. **Engineer an Active-Braking Runtime Assurance (RTA v2) Safety Filter:** Implement a directional projection filter ($u \cdot v \le 0$) that converts reckless collision trajectories into gentle captures.
 5. **Develop a CLI-Driven Orchestration Layer:** Provide a unified simulation engine (`simulate.py`) allowing arbitrary initial states, target positions, fuel levels, and timesteps, with automated telemetry and dashboard export.
-6. **Deliver 100% Test Coverage:** Implement rigorous unit and integration tests (64 test cases) verifying all mathematical and software boundaries.
+6. **Deliver Rigorous Tests:** 84 MVP unit, integration and regression tests plus 170 ROS-package tests, covering the mathematical and software boundaries (line coverage is not 100%).
 
 ---
 
@@ -194,16 +194,20 @@ Output: Commanded acceleration vector a_cmd
 Input: Commanded thrust u_cmd, relative position r, relative velocity v, fuel fraction
 Output: Applied thrust u_applied, override status, verdict reason
 
+Envelope: inside 5 m the closing speed c = -v.r_hat may not exceed
+          v_lim(d) = clamp(0.2 * d / 5, 0.05, 0.2) m/s; inside the 0.5 m capture
+          sphere total speed must stay below 0.1 m/s.
 1: If fuel < 0.05:
-       Return u_applied = [0, 0, 0], status = "emergency_hold", reason = "Fuel depleted"
-2: Compute range d = ||r|| and speed s = ||v||
-3: If d < 5.0 m AND s > 0.2 m/s:
-       Compute velocity projection: dot_prod = dot(u_cmd, v)
-       If dot_prod > 0 (accelerating):
-           Compute opposing unit vector: v_hat = v / s
-           Substitute maximum braking: u_applied = -1.0 * v_hat
-           Return u_applied, status = "active_braking", reason = "Proximity speed gate exceeded"
-4: Return u_applied = u_cmd, status = "accepted", reason = "Command safe"
+       If coasting is predicted to violate the envelope:
+           Return u_applied = envelope brake, status = "emergency_brake"
+       Return u_applied = [0, 0, 0], status = "emergency_hold"
+2: Predict one step under u_cmd (sampled through the step).
+   If no sample violates the envelope: Return u_cmd (policy keeps authority)
+3: u_backup = glideslope(r, v)                     # certified backup controller
+   If the step under u_backup is safe: Return u_backup, status = "braking_substituted"
+4: Return u_applied = speed-sized brake on the excess closing speed
+          (never reverses the vehicle, never adds tangential speed),
+          status = "braking_substituted"
 ```
 
 ---
@@ -212,26 +216,28 @@ Output: Applied thrust u_applied, override status, verdict reason
 
 ### 11.1 Quantitative Performance Comparison
 
-| Metric / Scenario | Certified Glideslope | Shipped PPO Policy | Reckless Slam (Unprotected) | Reckless Slam (v1 Zeroing Veto) | Reckless Slam (v2 Active Braking) |
+All runs at 0.1 m/s² per unit command, 1 s step; closest approach and speed are continuous-time
+(10 ms replay) for the reckless runs.
+
+| Metric / Scenario | Certified Glideslope | Shipped PPO Policy | Reckless Slam (Unprotected) | Reckless Slam (v1 Zeroing Veto) | Reckless Slam (v2 Predictive RTA) |
 |---|---|---|---|---|---|
-| **Control Mode** | Analytical Law | Deep RL (PPO) | Full Thrust ($+1.0$) | Full Thrust ($+1.0$) | Full Thrust ($+1.0$) |
-| **Safety Mode** | v1 / v2 Interlock | v1 Interlock | Safety Off | v1 (Zeroing) | **v2 (Active Brake)** |
-| **Starting Range** | $14.33\text{ m}$ | $18.22\text{ m}$ | $6.00\text{ m}$ | $6.00\text{ m}$ | $6.00\text{ m}$ |
-| **Closest Approach** | **$0.494\text{ m}$** | $5.268\text{ m}$ | $0.013\text{ m}$ (Subsampled) | $0.021\text{ m}$ (Subsampled) | **$0.003\text{ m}$** |
-| **Speed @ Closest** | **$0.017\text{ m/s}$** | $1.023\text{ m/s}$ | $6.480\text{ m/s}$ | $2.000\text{ m/s}$ | **$0.010\text{ m/s}$** |
-| **Mission Duration** | $97.0\text{ s}$ | $300.0\text{ s}$ (Timeout) | $60.0\text{ s}$ | $60.0\text{ s}$ | **$8.0\text{ s}$** |
-| **Total $\Delta v$** | $1.397\text{ m/s}$ | $53.825\text{ m/s}$ | $61.491\text{ m/s}$ | $53.008\text{ m/s}$ | **$8.034\text{ m/s}$** |
-| **Interlock Invocations**| $0$ | $0$ | $0$ | $17$ | **$4$** |
-| **Final Mission Result**| **Docked ($\mathbf{100\%}$)** | **Failed (Flew Away)** | **Catastrophic Crash** | **High-Speed Crash** | **Soft Docked ($\mathbf{100\%}$)** |
+| **Safety Mode** | v1 | v1 | off | v1 | **v2** |
+| **Starting Range** | 14.33 m | 18.22 m | 6.00 m | 6.00 m | 6.00 m |
+| **Closest Approach** | **0.493 m** | **0.481 m** | 0.042 m | 0.263 m | **0.485 m** |
+| **Speed @ Closest** | **0.017 m/s** | **0.022 m/s** | 1.096 m/s | 0.500 m/s | **0.017 m/s** |
+| **Mission Duration** | 98 s | 208 s | 11 s | 14 s | 70 s |
+| **Total Δv** | 1.381 m/s | 2.148 m/s | 1.106 m/s | 0.500 m/s | 0.795 m/s |
+| **Interlock Invocations** | 0 | 0 | 0 | 9 | 66 |
+| **Final Mission Result** | **Docked** | **Docked** | Collision | Collision | **Soft docked** |
 
 ### 11.2 Key Insights & Engineering Discussion
 
-1. **Glideslope Robustness:** The Glideslope guidance controller achieved **200/200 successful dockings (100.0%)** across randomized Monte Carlo initial states with an average of $106.3$ steps and zero safety violations.
-2. **Reinforcement Learning Failure Analysis:** The shipped PPO checkpoint failed 50/50 episodes ($0\%$ success), ending $3.72\text{ km}$ away. This confirmed that unbounded potential reward structures incentivize escaping over precision terminal deceleration.
-3. **Safety Interlock Breakthrough (v1 vs v2):**
-   * *v1 Zeroing Veto:* Reduced impact speed from $6.48\text{ m/s}$ to $2.00\text{ m/s}$, but still caused a collision because momentum carried the chaser through the target.
-   * *v2 Active Braking:* Successfully arrested relative momentum within $8$ seconds, bringing the craft to $0.01\text{ m/s}$ and achieving soft capture.
-4. **Verification Integrity:** All **40 unit and integration tests** pass deterministically across dynamics, environment, RTA logic, and CLI mission parsing.
+1. **Glideslope Robustness:** 200/200 dockings across randomized initial states, mean 107.2 steps, zero safety interventions.
+2. **Why RL failed, and the fix:** the original policy (0/50) was trained with 1 m/s² of authority per unit command, where exploration noise alone moves the vehicle about 1 m/s per step against a 0.1 m/s docking tolerance. At 0.1 m/s² the same PPO setup docks: 100% on the evaluation seeds and 500/500 fresh seeds. It is still slower and less fuel-efficient than the glideslope, and training is unstable across snapshots.
+3. **Veto vs runtime assurance:**
+   * *v1 Zeroing Veto:* lowers the impact speed (1.10 -> 0.50 m/s) but still collides: denying thrust is not braking.
+   * *v2 Predictive RTA:* checks every step against a closing-speed envelope and lets the certified glideslope fly whenever the policy's command would violate it, turning the same slam into a 0.017 m/s capture.
+4. **Verification Integrity:** 84 MVP tests and 170 ROS-package tests pass, including regression tests for every review finding and a live Gazebo/ROS round trip.
 
 ---
 

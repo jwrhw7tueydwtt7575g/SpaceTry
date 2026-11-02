@@ -430,8 +430,9 @@ def run_matrix(episodes: int = 120, seed: int = 0,
         },
         "verdicts": verdicts,
         "unverified": [
-            "Gazebo Harmonic closed-loop docking (no simulator host)",
-            "ROS 2 hardware-in-the-loop runs (no ROS host)",
+            "Gazebo Harmonic closed-loop docking (the plugin/bridge/ROS round trip is exercised "
+            "by the ROS CI job; a full docking run inside Gazebo is not)",
+            "ROS 2 hardware-in-the-loop runs (no hardware-in-the-loop rig)",
             "physical spacecraft hardware (no hardware)",
         ],
     }

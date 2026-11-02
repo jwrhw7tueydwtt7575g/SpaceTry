@@ -66,7 +66,7 @@ prefix; both work.
 PYTHONPATH=. .venv/bin/python -m pytest -q
 ```
 
-**Expected:** `64 passed` in about 12 seconds.
+**Expected:** `84 passed` in about 10 seconds.
 
 The suite covers the CW physics, the safety interlock, the environment, training and evaluation
 smoke tests, and the runtime-assurance filter. If you see `ModuleNotFoundError: spaceforge_mvp`, you
@@ -197,7 +197,7 @@ python3 -m http.server 8000
 
 ## 6. Reproduce every number the docs quote
 
-### The shipped policy — expect 0 successes
+### The shipped policy — expect 100% on these seeds
 
 ```bash
 PYTHONPATH=. .venv/bin/python -m spaceforge_mvp.eval.run_eval \
@@ -205,10 +205,12 @@ PYTHONPATH=. .venv/bin/python -m spaceforge_mvp.eval.run_eval \
 ```
 
 ```
-Success Rate               | 0.00%
-Average Fuel Used          | 0.0522
-Average Episode Length     | 300.00 steps
-Safety Overrides Triggered | 64
+Success Rate               | 100.00%
+Average Fuel Used          | 0.0241
+Average Episode Length     | 205.84 steps
+Safety Overrides Triggered | 3
+Beats Glideslope Baseline  | False
+Acceptance Passed          | True
 ```
 
 A `<frozen runpy>` RuntimeWarning about the module being in `sys.modules` comes from the package's
@@ -228,7 +230,7 @@ print(f'{ok}/200 docked, mean {steps/200:.1f} steps, {fires} interlock fires')"
 ```
 
 ```
-200/200 docked, mean 106.3 steps, 0 interlock fires
+200/200 docked, mean 107.2 steps, 0 interlock fires
 ```
 
 About 20 seconds.
@@ -241,18 +243,19 @@ PYTHONPATH=. .venv/bin/python -m spaceforge_mvp.eval.validation_matrix \
 ```
 
 ```
-[   nominal] success 100.00%  fuel 0.0014 (max 0.0017)  dv 1.417  overrides 0.000  violations 0
-[randomized] success 100.00%  fuel 0.0046 (max 0.0061)  dv 4.593  overrides 0.000  violations 0
-[    faults] success 100.00%  fuel 0.0294 (max 0.0462)  dv 3.708  overrides 0.000  violations 0
-[pose]      measured: mean 7.5e-08 m, max 5.8e-07 m over 120 trials
+[   nominal] success 100.00%  fuel 0.0141 (max 0.0174)  dv 1.411  overrides 0.000  violations 0
+[randomized] success 100.00%  fuel 0.0159 (max 0.0237)  dv 1.709  overrides 0.000  violations 0
+[    faults] success 100.00%  fuel 0.0363 (max 0.0456)  dv 1.514  overrides 0.000  violations 0
+[pose]      measured: 0.5 px noise -> mean 0.037 m, p95 0.139 m, max 0.194 m over 120 trials
 [llm]       measured: valid 1.0  contained 1.0
 [curriculum] measured: advance-in-50 True  rollback True
-[sim2sim]   measured: max div 1.5e-08 m, agreement 1.0
+[sim2sim]   measured: vs independent RK4 at 0.01 s max div 4.5e-11 m; vs semi-implicit Euler @0.1 s max div 0.025 m
+[transport] measured: max div 5.4e-09 m, agreement 1.0 (same simulator both sides)
 [verdicts]  {"success_above_threshold": true, "fuel_within_budget": true, "no_invariant_violations": true}
 ```
 
 120 episodes per domain level (360 total), 120 PnP trials, 20/25 LLM probes,
-20 paired sim-to-sim rollouts. About 2 minutes. Full numbers and the explicit
+20 paired sim-to-sim rollouts. About 15 seconds. Full numbers and the explicit
 unverified list live in `VALIDATION_RESULTS.md`. Sibling packages must be on
 `PYTHONPATH` for the pose/LLM/curriculum/sim2sim probes (see the CI `python`
 job); without them those probes report `unavailable` instead of guessing.

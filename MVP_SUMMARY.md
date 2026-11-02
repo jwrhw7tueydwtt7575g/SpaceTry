@@ -11,6 +11,12 @@ The original version of this document, as shipped by the author, is still in git
 `git show HEAD:MVP_SUMMARY.md`. It is worth reading once, because the contrast between what it
 claimed and what the repository did is itself one of the findings.
 
+> **Status (fix/review-findings).** The shipped PPO checkpoint now docks: 100% on `run_eval`'s
+> 50 seeds and 500/500 fresh seeds, zero collisions (§7.3). The runtime-assurance filter is
+> predictive and no longer lets a coasting, sideways-thrusting or mislabelled vehicle through
+> (§5.8). The ROS 2 / Gazebo stack builds and its tests run, including a live launch -> Gazebo ->
+> bridge round trip, in a ROS 2 Humble + Gazebo Harmonic container that mirrors the `ros` CI job.
+
 ---
 
 ## 0. Where to start
@@ -20,7 +26,7 @@ claimed and what the repository did is itself one of the findings.
 | Understand the problem and the physics | §1, §2 |
 | Understand the RL setup and the safety layer | §3 |
 | Know what files exist and who wrote them | §4 |
-| Know what was broken when this was handed over | §5 |
+| Know what was broken when this was handed over | §5 (§5.8: second review) |
 | Know what has been built since (including CLI orchestrator) | §6 |
 | Have numbers you can quote | §7 |
 | Actually run it | §8 |
@@ -182,7 +188,7 @@ Note the 1 Hz sampler can step over the 0.5 m bubble at m/s speeds; use
 | `viz/dashboard.py` | 497 | **added** | Emits self-contained interactive HTML replay |
 | `viz/scenarios.py` | 89 | **added** | Defines and records the five benchmark scenarios |
 | `viz/preview.py` | 59 | **added** | Renders single frames for inspection |
-| `tests/` (14 files) | ~1100 | mixed | 64 tests total (see `pytest --collect-only`) |
+| `tests/` (15 files) | ~1400 | mixed | 84 tests total (see `pytest --collect-only`) |
 
 ### Quick Directory & Folder Summary
 
@@ -213,7 +219,7 @@ problems:
 ### 5.1 The environment file was never committed
 `.gitignore` had a bare `env/` rule ignoring `spaceforge_mvp/env/`. Fixed by reconstructing `env/spacecraft_env.py` and anchoring ignore rules.
 
-### 5.2 The shipped policy never docks (0% success in 50 episodes)
+### 5.2 The original shipped policy never docked (0% success in 50 episodes) -- fixed, §7.3
 The reward paid for radial progress but never penalized flying away. The policy learns to fly away: ends 3.72 km out at 31.2 m/s.
 
 ### 5.3 The policy is worse than doing nothing
@@ -223,13 +229,38 @@ Zero thrust: drifts from 18.2 m to 20.2 m over 300 s. Trained policy: ends 3,720
 Max possible burn rate leaves 10% tank at step 300; fuel floor is 5%.
 
 ### 5.5 Interlock v1 zeroing veto is not a brake
-Denying thrust inside 5m allows craft to coast through target at 2.0 m/s. v2 active braking stops it at 0.01 m/s and docks in 8 s.
+Denying thrust inside 5m allows craft to coast through target at 2.0 m/s (original 1 m/s^2 authority). The original v2 "maximum braking" fix had its own holes -- see §5.8; the current predictive filter is described in §6.3.
 
 ### 5.6 Interlock authority starts at 5 m
 RL policy failure happens outside 5 m, so safety interlock never triggered.
 
 ### 5.7 CW dynamics tests were tautologies
 Asserted `cw_step` against `Phi @ x + Gamma @ u` produced by same module.
+
+### 5.8 Second review: what the hardening pass still got wrong (fixed on this branch)
+Each item has a regression test (`tests/test_review_regressions.py`, `tests/test_rta.py`,
+`mission_ctrl/test/test_safety_boundary.py`, `llm_planner/test/test_planner_boundary.py`).
+
+| Defect | Effect before the fix |
+|---|---|
+| Interlock counted any `u . v <= 0` as braking | A zero command (coasting) passed: a vehicle closing at 0.6 m/s from 3 m passed 2 cm from the target with 0 overrides under v2 |
+| Same rule, lateral thrust | `(0.01, 1, 1)` inside 5 m was "braking" and raised speed 0.3 -> 1.44 m/s |
+| v2 brake was always full authority | Reversed slow vehicles and raised speed (0.25 -> 0.75 m/s) |
+| Proximity gate scoped by goal label | `--goal DOCK` disabled it: the reckless slam hit at 3.46 m/s with 0 overrides |
+| Fuel floor zeroed thrust in v2 | A vehicle closing fast below the floor coasted into the target |
+| Fly-throughs did not end an episode | Collision was not a terminal condition; the recorder reported "timeout" |
+| Recorder ignored work-volume truncation | Kept stepping finished episodes ("timeout" 3.7 km out) |
+| Glideslope used module-default n, dt, authority | Unstable at `--dt 5` (ended 115 m out at 4.5 m/s); wrong units at other authorities |
+| Fault injection aliased the filter's output | A stuck thruster rewrote `applied_action`; bias faults burned no fuel |
+| mission_ctrl braked by `force . velocity` | A RETREAT moving away was braked back toward the target |
+| mission_ctrl held (zero thrust) on any rejected goal | Bad timeout / over-limit goal / LLM outage while closing fast -> coast into target |
+| mission_ctrl clipped before the keep-out check | A 4 N push at the target came back as 1 N at the target |
+| `validate_goal` compared NaN with `<`/`>` | `{"desired_distance_m": NaN}` from an LLM reply was ACCEPTED end to end |
+| OpenAI adapter ignored tool calls; cost was always 0 | Tool-call replies became `None`; the cost limit could never fire |
+| matplotlib pinned to 3.6.3 | The video renderer crashed (needs >= 3.8) |
+| ROS package never built; bridge aborted on start | CMake signature mix, missing `config/`, wrong executable path, nonexistent `Node::Publish`, duplicate `use_sim_time`, topic mismatch with the plugin |
+| ROS CI could not fail | Python tests died at import with no results (reported as 0 failures); launch_testing + pytest 8 dropped most test files |
+| Two validation metrics could not fail | "sim-to-sim" compared the env with a mock wrapping the same env; perception was solved on noise-free projections |
 
 ---
 
@@ -239,10 +270,17 @@ Asserted `cw_step` against `Phi @ x + Gamma @ u` produced by same module.
 Full Gymnasium implementation matching tests and documentation. Now accepts an injected `MissionConfig` and selectable `safety_mode` (`off`, `v1`, `v2`).
 
 ### 6.2 Certified guidance law — `control/glideslope.py`
-Proportional speed decay with CW feed-forward cancellation. Docks **200/200 seeds**, 0 interlock fires.
+Proportional speed decay with CW feed-forward cancellation at the mission's mean motion, gain
+limited to `1/dt`, closing speed capped by what the actuator can stop. `glideslope_controller(run_config)`
+binds it to a run. Docks **200/200 seeds**, 0 interlock fires.
 
 ### 6.3 Interlock v2 Runtime Assurance — `control/rta.py`
-Substitutes maximum opposing braking when speed gate is exceeded.
+Predictive, minimal-intervention filter. Every step is checked (sampled through the step, not just
+at its end) against a closing-speed envelope that tapers from 0.2 m/s at 5 m to half the docking
+speed near the target, plus a capture-sphere fly-through test. An unsafe policy command is replaced
+by the certified glideslope (Simplex backup); if even that is unsafe, by a speed-sized brake on the
+closing component. It never adds speed, never reverses the vehicle, never pushes a retreating vehicle
+toward the target, and still brakes below the fuel floor (`emergency_brake`).
 
 ### 6.4 CLI Simulation Orchestrator — `simulate.py` & `config.py` (NEW)
 - Provides typed `MissionConfig` object.
@@ -255,8 +293,13 @@ Substitutes maximum opposing braking when speed gate is exceeded.
 - `viz/render.py` & `viz/make_videos.py`: 1080p MP4 renderer for 3 acts and stitched presentation film.
 - `viz/dashboard.py`: Standalone HTML replay widget (`dashboard.html`).
 
-### 6.6 Full Test Suite (40 Tests)
-64 tests passing (`pytest spaceforge_mvp/tests -q`): CW dynamics, environment mechanics, safety interlocks, RTA active braking, domain randomization, validation matrix smoke, integration smoke, and CLI mission parsing.
+### 6.6 Test suites
+- MVP: **84 tests** (`pytest spaceforge_mvp/tests -q`): CW dynamics, environment, interlocks, RTA,
+  domain randomization, validation matrix, CLI, regression tests for every review finding,
+  renderer/dashboard smoke, and a check that the shipped checkpoint docks.
+- ROS packages offline (the `python` CI job's selection): **155 passed, 9 skipped**.
+- ROS CI job (`colcon build` + `colcon test`, Humble + Harmonic container): **170 tests, 0 failures**,
+  including the live Gazebo integration test.
 
 ---
 
@@ -264,19 +307,36 @@ Substitutes maximum opposing braking when speed gate is exceeded.
 
 ### 7.1 The five recorded scenarios (`viz/scenarios/*.json`)
 
+Defaults: 0.1 m/s^2 per unit command, 1 s step. Closest approach and speed are the continuous-time
+values (10 ms replay) where the trace was annotated.
+
 | Scenario | Safety | Seed | Steps | Start range | Closest approach | Speed there | Δv (m/s) | Interlock fires | Outcome |
 |---|---|---|---|---|---|---|---|---|---|
-| `docking` (glideslope) | v1 | 42 | 97 | 14.33 m | 0.4945 m | 0.0173 m/s | 1.397 | 0 | **docked** |
-| `rl_policy` (shipped PPO) | v1 | 42 | 300 | 18.22 m | 5.2681 m | 1.0234 m/s | 53.825 | 0 | timeout (3.72 km out) |
-| `hot_open` (reckless) | off | 7 | 60 | 6.00 m | 0.0135 m | 6.4799 m/s | 61.491 | 0 | flew through target |
-| `hot_v1` (zeroing veto) | v1 | 7 | 60 | 6.00 m | 0.0208 m | 1.9999 m/s | 53.008 | 17 | collision (coasted) |
-| `hot_v2` (braking veto) | v2 | 7 | 8 | 6.00 m | 0.0033 m | 0.0100 m/s | 8.034 | 4 | **docked in 8 s** |
+| `docking` (glideslope) | v1 | 42 | 98 | 14.33 m | 0.4933 m | 0.0173 m/s | 1.381 | 0 | **docked** |
+| `rl_policy` (shipped PPO) | v1 | 42 | 208 | 18.22 m | 0.4809 m | 0.0216 m/s | 2.148 | 0 | **docked** |
+| `hot_open` (reckless) | off | 7 | 11 | 6.00 m | 0.0417 m | 1.0957 m/s | 1.106 | 0 | collision |
+| `hot_v1` (zeroing veto) | v1 | 7 | 14 | 6.00 m | 0.2634 m | 0.4998 m/s | 0.500 | 9 | collision |
+| `hot_v2` (predictive RTA) | v2 | 7 | 70 | 6.00 m | 0.4850 m | 0.0170 m/s | 0.795 | 66 | **docked** |
 
 ### 7.2 The certified guidance law over 200 seeds
 - **200 / 200 dockings** (100% success rate)
-- Mean steps: 106.3 (49–132)
+- Mean steps: 107.2 (49–132)
 - 0 interlock overrides
-- Mean Δv: 1.418 m/s
+- Mean Δv: 1.411 m/s
+
+### 7.3 The shipped PPO policy
+Why the old one could not learn: at 1 m/s^2 per unit command, exploration noise alone moves the
+vehicle about 1 m/s per step against a 0.1 m/s docking tolerance. Controlled comparison (400k steps,
+50 held-out episodes): 1.0 m/s^2 -> 0% with either reward; 0.1 m/s^2 -> 100% with either reward.
+
+| Evaluation | Result |
+|---|---|
+| `run_eval`, seeds 42–91 | 100% success, fuel 0.0241, 205.8 steps, 3 overrides, acceptance passed |
+| 500 fresh seeds, safety v1 / v2 / off | 500/500 docked each, 0 collisions |
+| vs glideslope | does **not** beat it: slower (206 vs 107 steps) and more fuel (0.024 vs 0.014) |
+| Training stability | poor: held-out success across snapshots of one run: 100, 58, 31, 1, 86, 98% |
+
+Provenance and selection rule: `checkpoints/ppo_spacecraft_final.metadata.json`.
 
 ---
 
@@ -288,7 +348,7 @@ From the repository root:
 # 0. Activate virtual environment
 source .venv/bin/activate
 
-# 1. Run full test suite (64 tests)
+# 1. Run full test suite (84 tests)
 python3 -m pytest spaceforge_mvp/tests -q
 
 # 2. Run CLI Mission Simulation
@@ -303,6 +363,7 @@ python3 -m spaceforge_mvp.simulate \
   --dt 1 \
   --mean-motion 0.00113 \
   --safety v2 \
+  --max-accel 0.1 \
   --seed 42 \
   --output-dir runs/demo
 
@@ -325,10 +386,14 @@ python3 -m spaceforge_mvp.training.train --total_timesteps 500  # smoke test
 
 ## 9. What is still open
 
-1. **Reward redesign & retraining**: Bound episode exploration, add boundary escape penalty, align effort penalty with fuel.
-2. **Independent physics test**: Add RK4 numerical integration test against analytical CW STM matrix.
-3. **Future robotics layers**: Gazebo/ROS 2 closed-loop validation (workflow exists, needs a ROS+Gazebo runner).
-4. **PPO retraining under domain randomization**: shipped checkpoint is 0% even nominally.
+1. **RL training stability**: success swings between snapshots of a single run; checkpoint
+   selection on held-out seeds hides that rather than fixing it. Try lower learning rate,
+   larger batches, or SAC, and select by evaluation success instead of reward.
+2. **RL vs baseline**: the policy docks but is slower and costlier than the glideslope.
+3. **PPO under domain randomization and faults**: the shipped policy is validated only nominally.
+4. **Closed-loop docking inside Gazebo**: the plugin/bridge/ROS round trip is tested; a full
+   docking run in Gazebo is not.
+5. **Fuel-floor reachability**: at defaults a 300-step episode cannot drain the tank to the floor.
 
 ---
 
@@ -336,9 +401,9 @@ python3 -m spaceforge_mvp.training.train --total_timesteps 500  # smoke test
 
 - **Domain randomization** (`config.py: DomainConfig`, `env/spacecraft_env.py`): per-episode mass 0.8–1.2 kg scale, ±10% actuator effectiveness, thrust/observation noise, fuel spread. **Fault injection** (`FaultConfig`): stuck thruster, bias, dropout, sensor freeze, fuel leak. Both identity-by-default: 45/45 pre-existing tests pass unchanged, and identity-domain trajectories match bit-for-bit.
 - **Communication latency** (`rl_env MockTransport`): whole-control-step delay line, `ceil(latency/dt)`; 1–10 ms studies need backend dt ≤ 0.01 s (at dt=1 s any nonzero latency conservatively costs one step). Seeded noise replays identically.
-- **Validation matrix** (`eval/validation_matrix.py`, 120 episodes/level, seed 0): nominal/randomized/faults all **100% docking**, fuel 0.0014/0.0046/0.0294, 0 invariant violations; pose error mean 7.5e-08 m; LLM valid 1.00/contained 1.00; curriculum advance+rollback true; sim-to-sim max divergence 1.5e-08 m with 20/20 success agreement. Full table in `VALIDATION_RESULTS.md`.
-- **CI**: `python` (MVP + all ROS offline suites + matrix smoke), `frontend` (node logic + jsdom browser smoke), `lint` (ruff F/E9), `ros` (colcon + C++ Gazebo plugin + live tests — needs a ROS+Gazebo runner, unverified here).
-- **Known limitations**: shipped PPO still 0%; fuel-floor rule unreachable at defaults; ROS/Gazebo/hardware checks unverified; latency quantization is conservative at dt=1 s; PnP probe is noise-free (noise sensitivity via the randomized level instead).
+- **Validation matrix** (`eval/validation_matrix.py`, 120 episodes/level, seed 0): nominal/randomized/faults all **100% docking**, fuel 0.0141/0.0159/0.0363, Δv 1.41/1.71/1.51 m/s, 0 invariant violations; pose error under 0.5 px keypoint noise mean 3.7 cm (p95 13.9 cm); LLM valid 1.00/contained 1.00; curriculum advance+rollback true; exact STM vs independent RK4 max divergence 4.5e-11 m (a 0.1 s semi-implicit Euler engine step drifts 2.5 cm). Full table in `VALIDATION_RESULTS.md`.
+- **CI**: `python` (MVP + all ROS offline suites + matrix smoke), `frontend` (node logic + jsdom browser smoke), `lint` (ruff F/E9), `ros` (colcon build + C++ plugin + all package tests + live Gazebo integration; verified in a matching container, 170 tests, 0 failures).
+- **Known limitations**: see §9; latency quantization is conservative at dt=1 s.
 
 ---
 
