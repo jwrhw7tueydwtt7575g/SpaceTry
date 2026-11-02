@@ -7,7 +7,7 @@ Two pieces live here:
   purely geometric by default, and a command only counts as "braking" when it
   actually lowers the relative speed over the next control step.
 * Envelope helpers (``closing_speed``, ``closing_speed_limit``,
-  ``predict_unsafe``) shared with the v2 runtime-assurance filter in
+  ``envelope_applies``, ``predict_unsafe``) shared with the v2 runtime-assurance filter in
   ``spaceforge_mvp.control.rta``.
 """
 
@@ -44,19 +44,39 @@ def closing_speed(rel_pos: np.ndarray, rel_vel: np.ndarray) -> float:
     return float(-np.dot(vel, pos) / dist)
 
 
-def closing_speed_limit(dist: float, safety_config: SafetyConfig = SAFETY_CONFIG) -> float:
+def envelope_applies(dist: float, safety_config: SafetyConfig = SAFETY_CONFIG) -> bool:
+    """Is the closing-speed envelope enforced at range ``dist``?"""
+    return bool(dist < safety_config.safe_approach_dist or safety_config.outer_braking_fraction is not None)
+
+
+def closing_speed_limit(
+    dist: float,
+    safety_config: SafetyConfig = SAFETY_CONFIG,
+    max_accel: float = ACTUATOR_CONFIG.max_cmd_accel,
+) -> float:
     """Maximum permitted closing speed at range ``dist``.
 
-    Outside the keep-out bubble the limit is ``max_safe_closing_speed`` (it is
-    only enforced on states predicted to enter the bubble). Inside, it tapers
-    linearly with range down to ``capture_speed_fraction * max_docking_speed``,
-    so a vehicle that respects it is slow enough to be captured on arrival.
+    Inside the keep-out bubble the limit tapers linearly with range from
+    ``max_safe_closing_speed`` at the edge down to
+    ``capture_speed_fraction * max_docking_speed``, so a vehicle that respects
+    it is slow enough to be captured on arrival.
+
+    Outside the bubble it is a braking curve,
+    ``sqrt(edge**2 + 2 * f * max_accel * (dist - safe_approach_dist))`` with
+    ``f = outer_braking_fraction``: from any speed under the curve, a fraction
+    ``f`` of the authority is enough to arrive at the bubble edge no faster
+    than ``edge``. With ``outer_braking_fraction=None`` (legacy) the value
+    outside is ``edge`` and it is not enforced there (see ``envelope_applies``).
     """
     edge = float(safety_config.max_safe_closing_speed)
     floor = float(safety_config.capture_speed_fraction * safety_config.max_docking_speed)
-    if dist >= safety_config.safe_approach_dist:
-        return edge
-    scaled = edge * float(dist) / float(safety_config.safe_approach_dist)
+    safe = float(safety_config.safe_approach_dist)
+    if dist >= safe:
+        fraction = safety_config.outer_braking_fraction
+        if fraction is None:
+            return edge
+        return float(np.sqrt(edge * edge + 2.0 * float(fraction) * float(max_accel) * (float(dist) - safe)))
+    scaled = edge * float(dist) / safe
     return float(min(edge, max(floor, scaled)))
 
 
@@ -67,15 +87,18 @@ def predict_unsafe(
     dt: float,
     safety_config: SafetyConfig = SAFETY_CONFIG,
     samples: int = 8,
+    max_accel: float = ACTUATOR_CONFIG.max_cmd_accel,
 ) -> bool:
     """Would holding ``accel_mps2`` for one step violate the approach envelope?
 
     The step is sampled at ``samples`` points (constant-acceleration kinematics;
     the CW coupling over one control step is orders of magnitude smaller than
-    the actuator authority). A sample is unsafe when it is inside the keep-out
-    bubble and closing faster than the envelope allows, or inside the capture
-    sphere at or above the docking speed. Sampling the whole step -- not just
-    its end point -- catches a fly-through that starts and ends outside.
+    the actuator authority). A sample is unsafe when it closes faster than the
+    envelope allows wherever the envelope applies (inside the keep-out bubble,
+    and on the braking curve outside it unless that is disabled), or when it
+    is inside the capture sphere at or above the docking speed. Sampling the
+    whole step -- not just its end point -- catches a fly-through that starts
+    and ends outside. ``max_accel`` sizes the outer braking curve.
     """
     pos = np.asarray(rel_pos, dtype=np.float64)
     vel = np.asarray(rel_vel, dtype=np.float64)
@@ -88,17 +111,22 @@ def predict_unsafe(
     for d, pk, vk, s in zip(dists, p, v, speeds):
         if d < safety_config.capture_radius and s >= safety_config.max_docking_speed:
             return True
-        if d < safety_config.safe_approach_dist and closing_speed(pk, vk) > closing_speed_limit(d, safety_config) + 1e-12:
+        if envelope_applies(d, safety_config) and closing_speed(pk, vk) > closing_speed_limit(d, safety_config, max_accel) + 1e-12:
             return True
     return False
 
 
-def state_unsafe(rel_pos: np.ndarray, rel_vel: np.ndarray, safety_config: SafetyConfig = SAFETY_CONFIG) -> bool:
-    """Is the vehicle, right now, inside the bubble and closing above the envelope?"""
+def state_unsafe(
+    rel_pos: np.ndarray,
+    rel_vel: np.ndarray,
+    safety_config: SafetyConfig = SAFETY_CONFIG,
+    max_accel: float = ACTUATOR_CONFIG.max_cmd_accel,
+) -> bool:
+    """Is the vehicle, right now, closing faster than the envelope allows?"""
     dist = float(np.linalg.norm(rel_pos))
     return bool(
-        dist < safety_config.safe_approach_dist
-        and closing_speed(rel_pos, rel_vel) > closing_speed_limit(dist, safety_config) + 1e-12
+        envelope_applies(dist, safety_config)
+        and closing_speed(rel_pos, rel_vel) > closing_speed_limit(dist, safety_config, max_accel) + 1e-12
     )
 
 

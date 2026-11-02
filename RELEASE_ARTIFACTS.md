@@ -7,7 +7,8 @@ is hand-made. Commit the small ones; rebuild the large ones.
 |---|---|---|
 | `checkpoints/ppo_spacecraft_final.zip` | `python3 -m spaceforge_mvp.training.train --total_timesteps 300000 --save_freq 50000 --seed 1`, then select the snapshot with the best held-out success | Shipped PPO: 100% on `run_eval` seeds; provenance in `ppo_spacecraft_final.metadata.json` |
 | `spaceforge_mvp/viz/scenarios/*.json` | `python3 -m spaceforge_mvp.viz.scenarios` | 5 benchmark traces, committed (144 KB) |
-| `spaceforge_mvp/viz/dashboard.html` | `python3 -m spaceforge_mvp.viz.dashboard` | Standalone replay, committed |
+| `spaceforge_mvp/viz/dashboard.html` | `python3 -m spaceforge_mvp.viz.dashboard` | Mission Lab (live in-browser simulation), committed |
+| `spaceforge_mvp/viz/lab/policy.js`, `lab/fixtures.json` | `python3 -m spaceforge_mvp.viz.lab_export` | PPO weights and Python parity fixtures for the Lab, committed |
 | `spaceforge_mvp/viz/videos/*.mp4` | `python3 -m spaceforge_mvp.viz.make_videos --film` | NOT committed (~16 MB); 6-9 min render, needs ffmpeg |
 | `runs/*/mission.json, telemetry.json, metrics.json` | `python3 -m spaceforge_mvp.simulate --controller ... --output-dir runs/...` | NOT committed (gitignored) |
 | `training_report.json` / `hpo_report.json` | rl_trainer / auto_trainer runs | Machine-readable eval/HPO reports |

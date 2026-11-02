@@ -42,8 +42,18 @@ class SafetyConfig:
     # behaviour (only goals listed in proximity_goals are gated).
     proximity_goals: Tuple[str, ...] = ("APPROACH",)
     enforce_proximity_for_all_goals: bool = True
+    # Outside the keep-out sphere the v2 envelope is a braking curve: the fastest
+    # closing speed from which this fraction of the actuator authority still
+    # brakes the vehicle down to max_safe_closing_speed exactly at the sphere
+    # edge, v_lim(d) = sqrt(v_edge^2 + 2 * f * a_max * (d - safe_approach_dist)).
+    # Without it the filter only looks inside the sphere, and a vehicle that
+    # accelerates hard outside enters it far above the gate before braking.
+    # None restores that legacy (inside-only) envelope.
+    outer_braking_fraction: Optional[float] = 0.5
 
     def __post_init__(self) -> None:
+        if self.outer_braking_fraction is not None and not 0.0 < float(self.outer_braking_fraction) <= 1.0:
+            raise ValueError("SafetyConfig.outer_braking_fraction must be in (0, 1] or None")
         if self.safe_approach_dist <= 0.0 or self.max_safe_closing_speed <= 0.0:
             raise ValueError("Safety distances and speeds must be positive")
         if self.max_docking_speed <= 0.0 or self.capture_radius <= 0.0:
