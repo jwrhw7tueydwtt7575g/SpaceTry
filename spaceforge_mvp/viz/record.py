@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from spaceforge_mvp.config import ENV_CONFIG, PHYSICS_CONFIG, SAFETY_CONFIG, MissionConfig, RunConfig
+from spaceforge_mvp.config import ENV_CONFIG, PHYSICS_CONFIG, MissionConfig, RunConfig
 from spaceforge_mvp.core.cw_dynamics import cw_step
 from spaceforge_mvp.env.spacecraft_env import SpacecraftEnv
 
@@ -31,8 +31,9 @@ def _frame(
     speed: float,
     fuel: float,
     dv: float,
+    executed: Optional[np.ndarray] = None,
 ) -> Dict[str, Any]:
-    return {
+    frame = {
         "t": float(t),
         "pos": [round(float(v), 6) for v in pos],
         "vel": [round(float(v), 6) for v in vel],
@@ -44,6 +45,11 @@ def _frame(
         "fuel": round(float(fuel), 6),
         "dv": round(float(dv), 5),
     }
+    if executed is not None:
+        # Physical acceleration (m/s^2) the thrusters delivered after faults,
+        # mass scaling and noise -- what the continuous replay must integrate.
+        frame["executed"] = [round(float(v), 6) for v in executed]
+    return frame
 
 
 def replay_continuous_min(
@@ -68,9 +74,12 @@ def replay_continuous_min(
     n_sub = max(1, int(round(interval_dt / sub_dt)))
 
     for f in frames[1:]:
-        applied = np.asarray(f["applied"], dtype=np.float64)
+        if "executed" in f:
+            accel = np.asarray(f["executed"], dtype=np.float64)
+        else:
+            accel = np.asarray(f["applied"], dtype=np.float64) * max_cmd_accel
         for _ in range(n_sub):
-            pos, vel = cw_step(pos, vel, applied * max_cmd_accel, dt=sub_dt, n=mean_motion)
+            pos, vel = cw_step(pos, vel, accel, dt=sub_dt, n=mean_motion)
             d = float(np.linalg.norm(pos))
             if d < best_dist:
                 best_dist, best_speed = d, float(np.linalg.norm(vel))
@@ -142,11 +151,12 @@ def record_episode(
     min_dist = start_dist
     terminal_reason = "timeout"
 
-    def snap(t: float, cmd: np.ndarray, applied: np.ndarray, override: Optional[str]) -> None:
+    def snap(t: float, cmd: np.ndarray, applied: np.ndarray, override: Optional[str],
+             executed: Optional[np.ndarray] = None) -> None:
         dist = float(np.linalg.norm(env.rel_pos))
         speed = float(np.linalg.norm(env.rel_vel))
         frames.append(
-            _frame(t, env.rel_pos, env.rel_vel, cmd, applied, override, dist, speed, env.fuel, dv)
+            _frame(t, env.rel_pos, env.rel_vel, cmd, applied, override, dist, speed, env.fuel, dv, executed)
         )
 
     snap(0.0, np.zeros(3), np.zeros(3), None)
@@ -165,13 +175,20 @@ def record_episode(
         dist = float(np.linalg.norm(env.rel_pos))
         min_dist = min(min_dist, dist)
         step_dt = run_config.physics.dt if run_config else (mission.dt if mission else PHYSICS_CONFIG.dt)
-        snap(step * step_dt, cmd, applied, override)
+        snap(step * step_dt, cmd, applied, override, np.asarray(info.get("executed_action", applied), dtype=np.float64))
 
+        # Honour every episode end the environment reports; stepping a
+        # finished episode would record motion that never happened.
         if terminated:
-            terminal_reason = "docked"
+            terminal_reason = "collision" if info.get("collision") else "docked"
             break
-        if truncated and env.fuel <= 0.0:
-            terminal_reason = "fuel"
+        if truncated:
+            if env.fuel <= 0.0:
+                terminal_reason = "fuel"
+            elif info.get("out_of_bounds"):
+                terminal_reason = "out_of_bounds"
+            else:
+                terminal_reason = "timeout"
             break
 
     summary: Dict[str, Any] = {
@@ -201,7 +218,7 @@ def record_episode(
         summary["continuous_min_dist"] = round(best_d, 4)
         summary["continuous_min_speed"] = round(best_v, 4)
         summary["penetrated"] = bool(
-            best_d < ENV_CONFIG.docking_success_dist and best_v >= SAFETY_CONFIG.max_docking_speed
+            best_d < env.env_config.docking_success_dist and best_v >= env.safety_config.max_docking_speed
         )
 
     return {"summary": summary, "frames": frames}

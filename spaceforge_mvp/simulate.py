@@ -15,7 +15,7 @@ from typing import Callable, Sequence
 
 
 from spaceforge_mvp.config import ControllerConfig, MissionConfig, PhysicsConfig, RunConfig
-from spaceforge_mvp.control.glideslope import glideslope_action, hot_approach_action
+from spaceforge_mvp.control.glideslope import glideslope_controller, hot_approach_action
 from spaceforge_mvp.viz.record import record_episode, rl_controller
 
 
@@ -48,6 +48,11 @@ def build_parser() -> argparse.ArgumentParser:
 def run(args: argparse.Namespace) -> dict:
     if args.controller == "rl" and not args.checkpoint:
         raise ValueError("--checkpoint is required when --controller rl is selected")
+    if args.controller == "rl":
+        checkpoint = Path(args.checkpoint)
+        # SB3 appends ".zip" when it is missing, so accept either spelling.
+        if not checkpoint.is_file() and not checkpoint.with_name(checkpoint.name + ".zip").is_file():
+            raise ValueError(f"--checkpoint not found: {args.checkpoint}")
     if not 0.0 <= args.fuel <= 1.0:
         raise ValueError("--fuel must be between 0 and 1")
     if args.duration <= 0 or args.dt <= 0 or args.mean_motion <= 0:
@@ -81,7 +86,8 @@ def run(args: argparse.Namespace) -> dict:
     elif args.controller == "hot":
         controller = hot_approach_action
     else:
-        controller = glideslope_action
+        # Bind the law to this run's mean motion, step and actuator authority.
+        controller = glideslope_controller(run_config)
 
     episode = record_episode(
         controller,
