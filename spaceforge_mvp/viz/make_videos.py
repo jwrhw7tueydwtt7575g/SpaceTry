@@ -109,11 +109,11 @@ def build_manifest() -> Dict[str, Dict[str, Any]]:
         },
         "03_runtime_assurance": {
             "title": "Runtime assurance showdown",
-            "subtitle": "Identical reckless law · 6 m start · 1 s step · 60 s horizon",
+            "subtitle": "Identical reckless law · 6 m start · 1 s step · 120 s horizon",
             "tracks": lambda: [
                 _load("hot_open", "NO PROTECTION — powered through", RED),
                 _load("hot_v1", "v1 · THRUST ZEROED ON VETO", AMBER),
-                _load("hot_v2", "v2 · CERTIFIED BRAKING", GREEN),
+                _load("hot_v2", "v2 · PREDICTIVE RTA + CERTIFIED BACKUP", GREEN),
             ],
             "frames_per_step": 2,
             "hold_frames": 60,
@@ -132,11 +132,13 @@ def build_manifest() -> Dict[str, Dict[str, Any]]:
                 "verdict": True,
                 "head_color": GREEN,
                 "stat_color": GREEN,
-                "lines": ["Denying a command is not braking: the veto cut impact speed by 70% and still",
-                          "collided; substituting maximum braking captures at 1 cm/s."],
+                "lines": ["Denying a command is not braking: the veto still collided at "
+                          f"{hot_1['continuous_min_speed']:.2f} m/s;",
+                          "predicting each step and flying the certified backup captures at "
+                          f"{hot_2['continuous_min_speed']:.3f} m/s."],
                 "stats": [("No protection", f"{hot_o['continuous_min_speed']:.2f} m/s"),
                           ("Veto → zero thrust", f"{hot_1['continuous_min_speed']:.2f} m/s"),
-                          ("Veto → braking", f"{hot_2['continuous_min_speed']:.2f} m/s"),
+                          ("Predictive RTA", f"{hot_2['continuous_min_speed']:.3f} m/s"),
                           ("Result", f"docked in {hot_2['steps']} s")],
                 "frames": 125,
             },

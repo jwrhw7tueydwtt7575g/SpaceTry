@@ -42,19 +42,20 @@ def build(write: bool = True) -> Dict[str, Dict[str, Any]]:
     # 3. Reckless slam, no runtime assurance at all: powered penetration.
     traces["hot_open"] = record_episode(
         hot_approach_action, seed=7, label="Reckless slam, no interlock",
-        initial=HOT_START, safety="off", max_steps=60, annotate_continuous=True,
+        initial=HOT_START, safety="off", max_steps=120, annotate_continuous=True,
     )
 
     # 4. Same slam under the MVP interlock: veto = zero thrust.
     traces["hot_v1"] = record_episode(
         hot_approach_action, seed=7, label="Reckless slam, interlock v1 (zero thrust)",
-        initial=HOT_START, safety="v1", max_steps=60, annotate_continuous=True,
+        initial=HOT_START, safety="v1", max_steps=120, annotate_continuous=True,
     )
 
-    # 5. Same slam under runtime assurance v2: veto = certified braking.
+    # 5. Same slam under runtime assurance v2: predictive envelope filter with
+    #    the certified glideslope as backup controller.
     traces["hot_v2"] = record_episode(
-        hot_approach_action, seed=7, label="Reckless slam, interlock v2 (certified braking)",
-        initial=HOT_START, safety="v2", max_steps=60, annotate_continuous=True,
+        hot_approach_action, seed=7, label="Reckless slam, RTA v2 (predictive filter + certified backup)",
+        initial=HOT_START, safety="v2", max_steps=120, annotate_continuous=True,
     )
 
     if write:
